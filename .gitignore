@@ -1,0 +1,6 @@
+turned off the pager, \pset pager off.
+
+node_modules/
+.env
+*.log
+.DS_Store
