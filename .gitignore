@@ -5,8 +5,6 @@ node_modules/
 *.log
 .DS_Store
 
-token
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTc2MzgyNzg4MSwiZXhwIjoxNzYzODMxNDgxfQ.J71bIPvK2Ji02bWfWVJzG3xq5tHkgZbajhfIrWeznNU
 
 id:
 {
