@@ -9,6 +9,10 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/auth");
 
+const contentRoutes = require("./routes/content");
+
+const watchlistRoutes = require("./routes/watchlist");
+
 // Creates an express application
 const app = express();
 
@@ -56,6 +60,12 @@ app.get("/api/db-test", async (req, res) => {
 
 // this is what makes /api/auth/register exist
 app.use("/api/auth", authRoutes);
+
+// content routes
+app.use("/api/content", contentRoutes);
+
+// watchlist routes
+app.use("/api/watchlist", watchlistRoutes);
 
 // Start Server
 app.listen(PORT, () => {

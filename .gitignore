@@ -4,3 +4,17 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+token
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlhdCI6MTc2MzgyNzg4MSwiZXhwIjoxNzYzODMxNDgxfQ.J71bIPvK2Ji02bWfWVJzG3xq5tHkgZbajhfIrWeznNU
+
+id:
+{
+        "id": 22,
+        "tmdb_id": 1396,
+        "title": "Breaking Bad",
+        "type": "tv_show",
+        "poster_url": "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+        "release_year": 2008,
+        "genre": "Crime"
+    }
