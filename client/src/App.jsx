@@ -18,7 +18,7 @@ import {
 } from "react-router-dom";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
+console.log("API_BASE_URL from env:", API_BASE_URL);
 // App is main layout
 function App() {
   // Keep track of the logged-in user in React state
