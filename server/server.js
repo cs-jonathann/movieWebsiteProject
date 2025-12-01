@@ -24,7 +24,11 @@ const PORT = process.env.PORT || 5100;
 // CORS setup:
 // In production we'll set CLIENT_ORIGIN in Railway so only our frontend can talk to this backend.
 // In development we default to Vite's URL.
-const allowedOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+// allow both local dev and vercel
+const allowedOrigin = [
+  "http://localhost:5173",
+  "https://movie-website-project-3xn3y729j-notjonathans-projects.vercel.app",
+];
 
 app.use(
   cors({
