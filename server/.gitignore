@@ -16,3 +16,9 @@ id:
         "release_year": 2008,
         "genre": "Crime"
     }
+
+
+client/node_modules/
+server/node_modules/
+client/.env
+server/.env
