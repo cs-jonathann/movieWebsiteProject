@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+
+1. start streaming service 
+   - connect the api to play live movies and shows
+
+2. make sure the navbar is working properly with the watchlist page navbar covering up the entire width
+
+3. clean up the UI, make it look more professional and polished
+
+4. add a continue watching feature that allows user to continue watching from where they left off∆
