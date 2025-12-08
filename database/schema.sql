@@ -12,7 +12,9 @@ CREATE TABLE users (
 -- Content table (pre-seeded, read-only for users)
 CREATE TABLE content (
   id SERIAL PRIMARY KEY,
-  tmdb_id INTEGER UNIQUE NOT NULL,
+  tmdb_id INTEGER UNIQUE,
+  -- column for Vidsrc
+  imdb_id VARCHAR(20),          
   title VARCHAR(255) NOT NULL,
   type VARCHAR(20) CHECK (type IN ('movie', 'tv_show')) NOT NULL,
   poster_url VARCHAR(500),

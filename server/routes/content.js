@@ -14,7 +14,19 @@ router.get("/", async (req, res) => {
   try {
     // asking Postrges for a list of rows from the content table. newest content will be first (ORDER BY...)
     const result = await pool.query(
-      "SELECT id, tmdb_id, title, type, poster_url, release_year, genre FROM content ORDER BY created_at DESC"
+      `
+      SELECT
+        id,
+        title,
+        type,
+        poster_url,
+        release_year,
+        genre,
+        imdb_id,
+        tmdb_id,
+      FROM content
+      ORDER BY id
+      `
     );
     // results.row is an array of content objects from the DB. Sending array back to the client as a JSON
     res.json(result.rows);

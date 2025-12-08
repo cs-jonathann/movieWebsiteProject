@@ -7,6 +7,7 @@ import {
   useNavigate,
   Navigate,
   useLocation,
+  useParams,
 } from "react-router-dom";
 
 import "./App.css";
@@ -77,6 +78,16 @@ function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<BrowsePage />} />
+
+          <Route
+            path="/watch/:contentId"
+            element={
+              <RequireAuth>
+                <WatchPage />
+              </RequireAuth>
+            }
+          />
+
           <Route
             path="/watchlist"
             element={
@@ -117,6 +128,8 @@ function BrowsePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  const navigate = useNavigate(); // ⭐ new
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -232,6 +245,18 @@ function BrowsePage() {
                   {item.genre ? ` • ${item.genre}` : ""}
                 </div>
 
+                {/* ⭐ New: Watch now button */}
+                <button
+                  onClick={() =>
+                    navigate(`/watch/${item.id}`, { state: { item } })
+                  }
+                  className="btn btn-secondary btn-full"
+                  style={{ marginBottom: "0.4rem" }}
+                >
+                  Watch now
+                </button>
+
+                {/* Existing Add to Watchlist button */}
                 <button
                   onClick={() => handleAddToWatchlist(item.id)}
                   className="btn btn-primary btn-full"
@@ -254,6 +279,7 @@ function WatchlistPage() {
   const [error, setError] = useState("");
 
   const token = localStorage.getItem("token");
+  const navigate = useNavigate();
 
   const fetchWatchlist = async () => {
     setLoading(true);
@@ -421,25 +447,227 @@ function WatchlistPage() {
                     <p className="watchlist-meta">Notes: {item.notes}</p>
                   )}
 
-                  <div className="watchlist-actions">
+                  {/* adding watch now button */}
+                  <div className="mt-auto d-flex flex-column gap-2">
+                    {/* ⭐ New: Watch now button */}
                     <button
-                      onClick={() => handleToggleWatched(item)}
-                      className="btn btn-primary"
+                      onClick={() =>
+                        navigate(`/watch/${item.content_id}`, {
+                          state: { item },
+                        })
+                      }
+                      className="btn btn-sm btn-secondary"
                     >
-                      Mark as {item.watched ? "Not Watched" : "Watched"}
+                      Watch now
                     </button>
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      className="btn btn-danger"
-                    >
-                      Remove
-                    </button>
+
+                    <div className="d-flex gap-2">
+                      <button
+                        onClick={() => handleToggleWatched(item)}
+                        className="btn btn-sm btn-primary"
+                      >
+                        Mark as {item.watched ? "Not Watched" : "Watched"}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="btn btn-sm btn-danger"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Helper: build Vidsrc embed URL for a given time + optional season / episode. given this piece of content (movie or show), what Vidsrc link should I use to play it?
+function buildEmbedUrl(item, season = 1, episode = 1) {
+  if (!item) return null;
+
+  const movieBase = "https://vidsrc-embed.ru/embed/movie";
+  const tvBase = "https://vidsrc-embed.ru/embed/tv";
+
+  // ✅ correct field names and spelling
+  const hasImdb = !!item.imdb_id;
+  const hasTmdb = !!item.tmdb_id;
+
+  // MOVIES
+  if (item.type === "movie") {
+    if (hasImdb) {
+      // e.g. https://vidsrc-embed.ru/embed/movie/tt0468569
+      return `${movieBase}/${item.imdb_id}`;
+    }
+    if (hasTmdb) {
+      // fallback using TMDB id as query param
+      return `${movieBase}?tmdb=${item.tmdb_id}`;
+    }
+  }
+
+  // TV SHOWS
+  if (item.type === "tv_show") {
+    if (hasImdb) {
+      // e.g. https://vidsrc-embed.ru/embed/tv/tt0944947/1-1
+      return `${tvBase}/${item.imdb_id}/${season}-${episode}`;
+    }
+    if (hasTmdb) {
+      // fallback with TMDB as query param
+      return `${tvBase}?tmdb=${item.tmdb_id}&season=${season}&episode=${episode}`;
+    }
+  }
+
+  // If we get here, we had no usable ID
+  return null;
+}
+
+// Page that shows the actual video player using Vidsrc iframe
+function WatchPage() {
+  // If your route is /watch/:id, and the URL is /watch/7, then id === "7". That tells WatchPage which content to show.
+  const { contentId } = useParams(); // /watch/:contentId
+  const navigate = useNavigate(); // lets user go back or go to another page in coded
+  const location = useLocation();
+
+  // item may be passed from Browse/Watchlist via location.state
+  const passedItem = location.state?.item || null;
+
+  const [item, setItem] = useState(passedItem); // content we're trying to watch
+  const [season, setSeason] = useState(1); // used for tv shows to build the Vidsrc url
+  const [episode, setEpisode] = useState(1); // used for tv shows to build the Vidsrc url
+  const [error, setError] = useState(""); // text to show if something goes wrong
+
+  // handling error
+  useEffect(() => {
+    if (!item) {
+      setError(
+        "No content info found. Please go back and choose a title again."
+      );
+    }
+  }, [item]);
+
+  // streaming URL, calling the helper from up above
+  //   Based on item.type and its imdb_id or tmdb_id, plus season/episode for TV, it returns something like:
+  // Movie: https://vidsrc-embed.ru/embed/movie/tt5433140
+  // TV: https://vidsrc-embed.ru/embed/tv/tt0944947/1-1
+  // If it doesn’t have what it needs (no IDs), it returns an empty string ""
+  const embedUrl = buildEmbedUrl(item, season, episode);
+
+  return (
+    // centers everything anf keeps it from being too wide
+    <div
+      style={{
+        maxWidth: "1200px",
+        margin: "0 auto",
+        padding: "2rem 1rem",
+        color: "#f8f9fa",
+      }}
+    >
+      {/* back button */}
+      <button
+        // makes the browser go back one page
+        onClick={() => navigate(-1)}
+        style={{
+          marginBottom: "1rem",
+          padding: "0.4rem 0.8rem",
+          borderRadius: "4px",
+          border: "none",
+          backgroundColor: "#0d6efd",
+          color: "white",
+          cursor: "pointer",
+        }}
+      >
+        ← Back
+      </button>
+
+      {/* if we do have an item, show all its details, if not show an error */}
+      {item ? (
+        <>
+          <h1 style={{ marginBottom: "0.5rem" }}>
+            {item.title}{" "}
+            {item.release_year && (
+              <span style={{ fontSize: "0.8em", opacity: 0.8 }}>
+                ({item.release_year})
+              </span>
+            )}
+          </h1>
+          <p style={{ opacity: 0.8, marginBottom: "1rem" }}>
+            {item.type === "movie" ? "Movie" : "TV Show"}
+            {item.genre ? ` • ${item.genre}` : ""}
+          </p>
+
+          {/* TV controls, for the season(s) and episode(s) Lets the user type what season and episode they want. When they type, we call setSeason / setEpisode*/}
+          {item.type === "tv_show" && (
+            <div
+              style={{
+                display: "flex",
+                gap: "1rem",
+                marginBottom: "1rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <label>
+                Season:{" "}
+                <input
+                  type="number"
+                  min="1"
+                  value={season}
+                  onChange={(e) => setSeason(Number(e.target.value) || 1)}
+                  style={{ width: "60px" }}
+                />
+              </label>
+              <label>
+                Episode:{" "}
+                <input
+                  type="number"
+                  min="1"
+                  value={episode}
+                  onChange={(e) => setEpisode(Number(e.target.value) || 1)}
+                  style={{ width: "60px" }}
+                />
+              </label>
+            </div>
+          )}
+
+          {/* player frame */}
+          {embedUrl ? (
+            <div
+              style={{
+                position: "relative",
+                paddingBottom: "56.25%", // 16:9
+                height: 0,
+                overflow: "hidden",
+                borderRadius: "10px",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
+              }}
+            >
+              {/* iframe points to the Vidsrc URL and this is what actually shows the video player on screen */}
+              <iframe
+                src={embedUrl}
+                title={item.title}
+                allowFullScreen
+                frameBorder="0"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                }}
+              />
+            </div>
+          ) : (
+            // if the embedUrl is empty, show a red error message
+            <p style={{ color: "red" }}>
+              Sorry, we don&apos;t have a valid stream URL for this title.
+            </p>
+          )}
+        </>
+      ) : (
+        <p style={{ color: "red" }}>{error}</p>
       )}
     </div>
   );
