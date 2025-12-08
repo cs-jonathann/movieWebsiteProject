@@ -27,12 +27,14 @@ const PORT = process.env.PORT || 5100;
 // allow both local dev and vercel
 const allowedOrigin = [
   "http://localhost:5173",
+  "https://movie-website-project-rose.vercel.app",
   "https://movie-website-project-3xn3y729j-notjonathans-projects.vercel.app",
 ];
 
 app.use(
   cors({
     origin: allowedOrigin,
+    credentials: true, // important if you send cookies / credentials from frontend
   })
 ); // enables cors for frontend requests
 
