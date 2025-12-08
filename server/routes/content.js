@@ -12,28 +12,25 @@ const router = express.Router();
 // GET /api/content  -> list all content
 router.get("/", async (req, res) => {
   try {
-    // asking Postrges for a list of rows from the content table. newest content will be first (ORDER BY...)
     const result = await pool.query(
       `
-      SELECT
-        id,
-        title,
-        type,
-        poster_url,
-        release_year,
-        genre,
-        imdb_id,
-        tmdb_id,
+      SELECT *
       FROM content
-      ORDER BY id
+      ORDER BY created_at DESC
+      LIMIT 300
       `
     );
-    // results.row is an array of content objects from the DB. Sending array back to the client as a JSON
+
     res.json(result.rows);
   } catch (err) {
-    // if anything fails then error
-    console.error("Content fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch content" });
+    console.error("Content fetch error:", err); // 👈 full error in server terminal
+
+    // TEMPORARY: expose details so we can see in the browser too
+    res.status(500).json({
+      error: "Failed to fetch content",
+      details: err.message, // <- this is the key line
+      code: err.code || null, // optional but helpful
+    });
   }
 });
 
