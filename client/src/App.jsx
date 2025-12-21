@@ -900,58 +900,117 @@ function WatchPage() {
   const [episode, setEpisode] = useState(1); // used for tv shows to build the Vidsrc url
   const [error, setError] = useState(""); // text to show if something goes wrong
   const [savedProgress, setSavedProgress] = useState(0);
+  const [actualDuration, setActualDuration] = useState(7200); // Default 2 hours in seconds
+  const [isPageVisible, setIsPageVisible] = useState(true);
 
-  // Load saved progress when component mounts
+  // Load saved progress and fetch actual duration from TMDB
   useEffect(() => {
-    const loadProgress = async () => {
+    const loadProgressAndDuration = async () => {
       const token = localStorage.getItem("token");
-      if (!token || !contentId) return;
 
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/progress/${contentId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+      // Load saved progress
+      if (token && contentId) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/progress/${contentId}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          setSavedProgress(data.progress_seconds || 0);
-          console.log("Loaded progress:", data.progress_seconds);
+          if (res.ok) {
+            const data = await res.json();
+            setSavedProgress(data.progress_seconds || 0);
+            console.log("Loaded progress:", data.progress_seconds);
+          }
+        } catch (err) {
+          console.error("Error loading progress:", err);
         }
-      } catch (err) {
-        console.error("Error loading progress:", err);
+      }
+
+      // Fetch actual duration from TMDB
+      if (item && item.tmdb_id) {
+        try {
+          const tmdbType = item.type === "movie" ? "movie" : "tv";
+          const tmdbApiKey = import.meta.env.VITE_TMDB_API_KEY;
+
+          if (!tmdbApiKey) {
+            console.warn("TMDB API key not found, using default duration");
+            setActualDuration(item.type === "movie" ? 7200 : 2700);
+            return;
+          }
+
+          const tmdbRes = await fetch(
+            `https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}`
+          );
+
+          if (tmdbRes.ok) {
+            const tmdbData = await tmdbRes.json();
+
+            if (item.type === "movie" && tmdbData.runtime) {
+              // Movie runtime in minutes -> convert to seconds
+              setActualDuration(tmdbData.runtime * 60);
+              console.log("Movie duration:", tmdbData.runtime, "minutes");
+            } else if (item.type === "tv_show") {
+              // TV show episode runtime (average)
+              const episodeRuntime = tmdbData.episode_run_time?.[0] || 45;
+              setActualDuration(episodeRuntime * 60);
+              console.log("TV episode duration:", episodeRuntime, "minutes");
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching TMDB duration:", err);
+          // Fallback: estimate based on type
+          setActualDuration(item.type === "movie" ? 7200 : 2700); // 2hrs for movies, 45min for TV
+        }
       }
     };
 
-    loadProgress();
-  }, [contentId]);
+    loadProgressAndDuration();
+  }, [contentId, item]);
 
-  // Save progress periodically (every 10 seconds)
+  // Track page visibility (pause tracking when user switches tabs)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+      console.log("Page visibility:", !document.hidden);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  // Save progress periodically (only when page is visible)
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token || !contentId) return;
+    if (!token || !contentId || !isPageVisible) return;
 
     const interval = setInterval(() => {
-      // Save progress
-      fetch(`${API_BASE_URL}/api/progress`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          contentId: parseInt(contentId, 10),
-          progressSeconds: savedProgress + 10, // Increment by 10 seconds
-          durationSeconds: 7200, // Estimate 2 hours, adjust as needed
-        }),
-      }).catch((err) => console.error("Error saving progress:", err));
+      const newProgress = savedProgress + 10;
 
-      setSavedProgress((prev) => prev + 10);
+      // Don't exceed 95% of duration (so "continue watching" stops showing near the end)
+      if (newProgress < actualDuration * 0.95) {
+        fetch(`${API_BASE_URL}/api/progress`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            contentId: parseInt(contentId, 10),
+            progressSeconds: newProgress,
+            durationSeconds: actualDuration,
+          }),
+        }).catch((err) => console.error("Error saving progress:", err));
+
+        setSavedProgress(newProgress);
+      } else {
+        console.log("Near end of content, stopping progress tracking");
+      }
     }, 10000); // Every 10 seconds
 
     return () => clearInterval(interval);
-  }, [contentId, savedProgress]);
+  }, [contentId, savedProgress, actualDuration, isPageVisible]);
 
   // handling error
   useEffect(() => {
@@ -969,10 +1028,17 @@ function WatchPage() {
   // If it doesn't have what it needs (no IDs), it returns an empty string ""
   const embedUrl = buildEmbedUrl(item, season, episode);
 
-  // Format seconds to MM:SS
+  // Format seconds to MM:SS or HH:MM:SS
   const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, "0")}:${secs
+        .toString()
+        .padStart(2, "0")}`;
+    }
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
