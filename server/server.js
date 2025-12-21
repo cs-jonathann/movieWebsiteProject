@@ -14,6 +14,7 @@ const pool = require("./config/db");
 const authRoutes = require("./routes/auth");
 const contentRoutes = require("./routes/content");
 const watchlistRoutes = require("./routes/watchlist");
+const progressRoutes = require("./routes/progress");
 
 // Creates an express application
 const app = express();
@@ -70,6 +71,9 @@ app.use("/api/content", contentRoutes);
 
 // watchlist routes
 app.use("/api/watchlist", watchlistRoutes);
+
+// progress routes
+app.use("/api/progress", progressRoutes);
 
 // Start Server
 app.listen(PORT, () => {

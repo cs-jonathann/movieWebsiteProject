@@ -176,8 +176,8 @@ async function main() {
     }
 
     // how many pages of each you want to import
-    await importMovies(5); // ~100 movies
-    await importTvShows(5); // ~100 tv shows
+    await importMovies(15); // ~300 movies
+    await importTvShows(15); // ~300 tv shows
 
     // logging success or error
     console.log("TMDb import completed.");

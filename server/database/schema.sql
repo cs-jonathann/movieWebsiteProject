@@ -33,3 +33,17 @@ CREATE TABLE watchlist (
   UNIQUE(user_id, content_id)
 );
 
+
+-- Watch progress table (tracks where users left off)
+CREATE TABLE IF NOT EXISTS watch_progress (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  content_id INTEGER REFERENCES content(id) ON DELETE CASCADE NOT NULL,
+  progress_seconds INTEGER DEFAULT 0,
+  duration_seconds INTEGER DEFAULT 0,
+  last_watched TIMESTAMP DEFAULT NOW(),
+  UNIQUE(user_id, content_id)
+);
+
+-- Index for faster queries
+CREATE INDEX IF NOT EXISTS idx_watch_progress_user ON watch_progress(user_id, last_watched DESC);

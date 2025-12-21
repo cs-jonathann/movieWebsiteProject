@@ -22,10 +22,32 @@ function App() {
     return stored ? JSON.parse(stored) : null;
   });
 
+  // Search state at App level
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     setUser(null);
+  };
+
+  // Handle search submit
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearchTerm(searchInput);
+    // Navigate to home page if not already there
+    if (location.pathname !== "/") {
+      navigate("/");
+    }
+  };
+
+  // Clear search
+  const handleClearSearch = () => {
+    setSearchInput("");
+    setSearchTerm("");
   };
 
   return (
@@ -55,11 +77,61 @@ function App() {
       <nav className="app-nav">
         <div className="app-nav-inner">
           <Link className="nav-link" to="/">
-            Browse
+            Home
           </Link>
           <Link className="nav-link" to="/watchlist">
             My Watchlist
           </Link>
+
+          {/* Search Bar in Navigation */}
+          <form
+            onSubmit={handleSearch}
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              marginLeft: "auto",
+              alignItems: "center",
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Search movies/shows..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              style={{
+                padding: "0.5rem 0.75rem",
+                fontSize: "0.9rem",
+                border: "1px solid #444",
+                borderRadius: "4px",
+                backgroundColor: "#2a2a2a",
+                color: "#fff",
+                width: "250px",
+              }}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{
+                padding: "0.5rem 1rem",
+                fontSize: "0.9rem",
+              }}
+            >
+              Search
+            </button>
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                className="btn btn-secondary"
+                style={{
+                  padding: "0.5rem 1rem",
+                  fontSize: "0.9rem",
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </form>
 
           {!user && (
             <div className="nav-right">
@@ -77,7 +149,7 @@ function App() {
       {/* Page content */}
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<BrowsePage />} />
+          <Route path="/" element={<BrowsePage searchTerm={searchTerm} />} />
 
           <Route
             path="/watch/:contentId"
@@ -122,14 +194,161 @@ function RequireAuth({ children }) {
   return children;
 }
 
-// Browse page
-function BrowsePage() {
+// Continue Watching Component
+function ContinueWatchingSection({ navigate }) {
+  const [continueWatching, setContinueWatching] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchContinueWatching = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/progress`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setContinueWatching(data);
+        }
+      } catch (err) {
+        console.error("Error fetching continue watching:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchContinueWatching();
+  }, []);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const getProgressPercentage = (progress, duration) => {
+    return ((progress / duration) * 100).toFixed(0);
+  };
+
+  if (loading || continueWatching.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: "3rem" }}>
+      <h2 style={{ marginBottom: "1rem", fontSize: "1.5rem" }}>
+        Continue Watching
+      </h2>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+          gap: "1.5rem",
+        }}
+      >
+        {continueWatching.map((item) => (
+          <div
+            key={item.id}
+            style={{
+              backgroundColor: "#111",
+              borderRadius: "10px",
+              overflow: "hidden",
+              cursor: "pointer",
+              position: "relative",
+            }}
+            onClick={() =>
+              navigate(`/watch/${item.content_id}`, { state: { item } })
+            }
+          >
+            <div style={{ position: "relative" }}>
+              {item.poster_url ? (
+                <img
+                  src={item.poster_url}
+                  alt={item.title}
+                  style={{
+                    width: "100%",
+                    height: "260px",
+                    objectFit: "cover",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "260px",
+                    backgroundColor: "#222",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <span style={{ color: "#888" }}>No image</span>
+                </div>
+              )}
+
+              {/* Progress bar */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: "4px",
+                  backgroundColor: "rgba(255,255,255,0.3)",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${getProgressPercentage(
+                      item.progress_seconds,
+                      item.duration_seconds
+                    )}%`,
+                    backgroundColor: "#0d6efd",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: "0.6rem 0.7rem" }}>
+              <h6 style={{ margin: 0, fontSize: "0.9rem" }}>{item.title}</h6>
+              <p
+                style={{
+                  fontSize: "0.75rem",
+                  color: "#ccc",
+                  margin: "0.2rem 0 0",
+                }}
+              >
+                {formatTime(item.progress_seconds)} /{" "}
+                {formatTime(item.duration_seconds)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrowsePage({ searchTerm }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  const navigate = useNavigate(); // ⭐ new
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const itemsPerPage = 108;
+
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -137,7 +356,15 @@ function BrowsePage() {
       setError("");
 
       try {
-        const res = await fetch(`${API_BASE_URL}/api/content`);
+        // Build URL with search parameter if exists
+        const url = new URL(`${API_BASE_URL}/api/content`);
+        url.searchParams.append("page", currentPage);
+        url.searchParams.append("limit", itemsPerPage);
+        if (searchTerm) {
+          url.searchParams.append("search", searchTerm);
+        }
+
+        const res = await fetch(url);
         const data = await res.json();
 
         if (!res.ok) {
@@ -145,7 +372,11 @@ function BrowsePage() {
           return;
         }
 
-        setItems(data);
+        setItems(data.items || []);
+        setTotalPages(data.totalPages || 1);
+        setTotalItems(data.total || 0);
+
+        console.log("Loaded page:", currentPage, "Items:", data.items?.length);
       } catch (err) {
         console.error("Error fetching content:", err);
         setError("Network error while loading content");
@@ -155,7 +386,7 @@ function BrowsePage() {
     };
 
     fetchContent();
-  }, []);
+  }, [currentPage, searchTerm]); // Re-fetch when page or search changes
 
   const handleAddToWatchlist = async (contentId) => {
     const token = localStorage.getItem("token");
@@ -194,6 +425,58 @@ function BrowsePage() {
     }
   };
 
+  // Pagination handlers
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const handlePageClick = (pageNum) => {
+    setCurrentPage(pageNum);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Generate page numbers
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxPagesToShow = 5;
+
+    if (totalPages <= maxPagesToShow) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) pages.push(i);
+        pages.push("...");
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1);
+        pages.push("...");
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push("...");
+        pages.push(currentPage - 1);
+        pages.push(currentPage);
+        pages.push(currentPage + 1);
+        pages.push("...");
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
+  };
+
   if (loading) {
     return (
       <div className="page page-browse">
@@ -205,7 +488,6 @@ function BrowsePage() {
   if (error) {
     return (
       <div className="page page-browse">
-        <h1 className="page-title">Browse Content</h1>
         <p className="text-error">{error}</p>
       </div>
     );
@@ -213,60 +495,138 @@ function BrowsePage() {
 
   return (
     <div className="page page-browse">
-      <h1 className="page-title">Browse Content</h1>
+      {/* Show active search */}
+      {searchTerm && (
+        <div
+          style={{ textAlign: "center", marginBottom: "1rem", opacity: 0.8 }}
+        >
+          Searching for: <strong>"{searchTerm}"</strong>
+        </div>
+      )}
+
+      {/* Continue Watching Section */}
+      {!searchTerm && <ContinueWatchingSection navigate={navigate} />}
+
+      {/* Pagination info */}
 
       {successMessage && (
         <p className="text-success text-center">{successMessage}</p>
       )}
 
       {items.length === 0 ? (
-        <p className="text-center">No content found.</p>
+        <p className="text-center">
+          {searchTerm
+            ? `No results found for "${searchTerm}"`
+            : "No content found."}
+        </p>
       ) : (
-        <div className="content-grid">
-          {items.map((item) => (
-            <div key={item.id} className="content-card">
-              <div className="content-card-poster">
-                {item.poster_url ? (
-                  <img
-                    src={item.poster_url}
-                    alt={item.title}
-                    className="content-card-img"
-                  />
-                ) : (
-                  <span className="content-card-noimg">No image</span>
-                )}
-              </div>
-
-              <div className="content-card-body">
-                <h6 className="content-card-title">{item.title}</h6>
-                <div className="content-card-meta">
-                  {item.type === "movie" ? "Movie" : "TV Show"} •{" "}
-                  {item.release_year || "Unknown year"}
-                  {item.genre ? ` • ${item.genre}` : ""}
+        <>
+          <div className="content-grid">
+            {items.map((item) => (
+              <div key={item.id} className="content-card">
+                <div className="content-card-poster">
+                  {item.poster_url ? (
+                    <img
+                      src={item.poster_url}
+                      alt={item.title}
+                      className="content-card-img"
+                    />
+                  ) : (
+                    <span className="content-card-noimg">No image</span>
+                  )}
                 </div>
 
-                {/* ⭐ New: Watch now button */}
-                <button
-                  onClick={() =>
-                    navigate(`/watch/${item.id}`, { state: { item } })
-                  }
-                  className="btn btn-secondary btn-full"
-                  style={{ marginBottom: "0.4rem" }}
-                >
-                  Watch now
-                </button>
+                <div className="content-card-body">
+                  <h6 className="content-card-title">{item.title}</h6>
+                  <div className="content-card-meta">
+                    {item.type === "movie" ? "Movie" : "TV Show"} •{" "}
+                    {item.release_year || "Unknown year"}
+                    {item.genre ? ` • ${item.genre}` : ""}
+                  </div>
 
-                {/* Existing Add to Watchlist button */}
-                <button
-                  onClick={() => handleAddToWatchlist(item.id)}
-                  className="btn btn-primary btn-full"
-                >
-                  Add to Watchlist
-                </button>
+                  <button
+                    onClick={() =>
+                      navigate(`/watch/${item.id}`, { state: { item } })
+                    }
+                    className="btn btn-secondary btn-full"
+                    style={{ marginBottom: "0.4rem" }}
+                  >
+                    Watch now
+                  </button>
+
+                  <button
+                    onClick={() => handleAddToWatchlist(item.id)}
+                    className="btn btn-primary btn-full"
+                  >
+                    Add to Watchlist
+                  </button>
+                </div>
               </div>
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginTop: "2rem",
+                marginBottom: "2rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                onClick={handlePreviousPage}
+                disabled={currentPage === 1}
+                className="btn btn-secondary"
+                style={{
+                  opacity: currentPage === 1 ? 0.5 : 1,
+                  cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                }}
+              >
+                Previous
+              </button>
+
+              {getPageNumbers().map((pageNum, idx) =>
+                pageNum === "..." ? (
+                  <span key={`ellipsis-${idx}`} style={{ padding: "0.5rem" }}>
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={pageNum}
+                    onClick={() => handlePageClick(pageNum)}
+                    className={`btn ${
+                      currentPage === pageNum ? "btn-primary" : "btn-secondary"
+                    }`}
+                    style={{
+                      minWidth: "40px",
+                      fontWeight: currentPage === pageNum ? "bold" : "normal",
+                    }}
+                  >
+                    {pageNum}
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages}
+                className="btn btn-secondary"
+                style={{
+                  opacity: currentPage === totalPages ? 0.5 : 1,
+                  cursor:
+                    currentPage === totalPages ? "not-allowed" : "pointer",
+                }}
+              >
+                Next
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -539,6 +899,59 @@ function WatchPage() {
   const [season, setSeason] = useState(1); // used for tv shows to build the Vidsrc url
   const [episode, setEpisode] = useState(1); // used for tv shows to build the Vidsrc url
   const [error, setError] = useState(""); // text to show if something goes wrong
+  const [savedProgress, setSavedProgress] = useState(0);
+
+  // Load saved progress when component mounts
+  useEffect(() => {
+    const loadProgress = async () => {
+      const token = localStorage.getItem("token");
+      if (!token || !contentId) return;
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/progress/${contentId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setSavedProgress(data.progress_seconds || 0);
+          console.log("Loaded progress:", data.progress_seconds);
+        }
+      } catch (err) {
+        console.error("Error loading progress:", err);
+      }
+    };
+
+    loadProgress();
+  }, [contentId]);
+
+  // Save progress periodically (every 10 seconds)
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token || !contentId) return;
+
+    const interval = setInterval(() => {
+      // Save progress
+      fetch(`${API_BASE_URL}/api/progress`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          contentId: parseInt(contentId, 10),
+          progressSeconds: savedProgress + 10, // Increment by 10 seconds
+          durationSeconds: 7200, // Estimate 2 hours, adjust as needed
+        }),
+      }).catch((err) => console.error("Error saving progress:", err));
+
+      setSavedProgress((prev) => prev + 10);
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [contentId, savedProgress]);
 
   // handling error
   useEffect(() => {
@@ -553,8 +966,15 @@ function WatchPage() {
   //   Based on item.type and its imdb_id or tmdb_id, plus season/episode for TV, it returns something like:
   // Movie: https://vidsrc-embed.ru/embed/movie/tt5433140
   // TV: https://vidsrc-embed.ru/embed/tv/tt0944947/1-1
-  // If it doesn’t have what it needs (no IDs), it returns an empty string ""
+  // If it doesn't have what it needs (no IDs), it returns an empty string ""
   const embedUrl = buildEmbedUrl(item, season, episode);
+
+  // Format seconds to MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
   return (
     // centers everything anf keeps it from being too wide
@@ -597,6 +1017,11 @@ function WatchPage() {
           <p style={{ opacity: 0.8, marginBottom: "1rem" }}>
             {item.type === "movie" ? "Movie" : "TV Show"}
             {item.genre ? ` • ${item.genre}` : ""}
+            {savedProgress > 0 && (
+              <span style={{ color: "#4cd964", marginLeft: "1rem" }}>
+                • Resuming from {formatTime(savedProgress)}
+              </span>
+            )}
           </p>
 
           {/* TV controls, for the season(s) and episode(s) Lets the user type what season and episode they want. When they type, we call setSeason / setEpisode*/}
