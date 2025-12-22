@@ -105,7 +105,8 @@ function App() {
                 borderRadius: "4px",
                 backgroundColor: "#2a2a2a",
                 color: "#fff",
-                width: "250px",
+                width: "180px",
+                maxWidth: "180px",
               }}
             />
             <button

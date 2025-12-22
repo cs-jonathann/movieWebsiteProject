@@ -28,6 +28,18 @@ body,
 
 body {
   min-height: 100vh;
-  background-color: #001f3f; /* navy to match the app */
+  background-color: #000000; /* black to match the app */
   color: #f8f9fa;
+}
+
+body {
+  min-height: 100vh;
+  background-color: #000000; /* black to match the app */
+  color: #f8f9fa;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+  max-width: 100vw; /* Never exceed viewport width */
+}
+
+html {
+  overflow-x: hidden; /* Prevent horizontal scroll on html too */
 }
