@@ -195,10 +195,14 @@ function RequireAuth({ children }) {
   return children;
 }
 
-// Continue Watching Component
+// Continue Watching Component with Carousel
 function ContinueWatchingSection({ navigate }) {
   const [continueWatching, setContinueWatching] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scrollPosition, setScrollPosition] = useState(0);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const carouselRef = React.useRef(null);
 
   useEffect(() => {
     const fetchContinueWatching = async () => {
@@ -229,6 +233,39 @@ function ContinueWatchingSection({ navigate }) {
     fetchContinueWatching();
   }, []);
 
+  // Check scroll position to show/hide arrows
+  useEffect(() => {
+    const checkScroll = () => {
+      if (carouselRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = carouselRef.current;
+        setCanScrollLeft(scrollLeft > 0);
+        setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
+      }
+    };
+
+    checkScroll();
+    const carousel = carouselRef.current;
+    if (carousel) {
+      carousel.addEventListener("scroll", checkScroll);
+      return () => carousel.removeEventListener("scroll", checkScroll);
+    }
+  }, [continueWatching]);
+
+  const scroll = (direction) => {
+    if (carouselRef.current) {
+      const scrollAmount = 600; // Adjust scroll distance
+      const newPosition =
+        direction === "left"
+          ? carouselRef.current.scrollLeft - scrollAmount
+          : carouselRef.current.scrollLeft + scrollAmount;
+
+      carouselRef.current.scrollTo({
+        left: newPosition,
+        behavior: "smooth",
+      });
+    }
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -242,30 +279,90 @@ function ContinueWatchingSection({ navigate }) {
   if (loading || continueWatching.length === 0) return null;
 
   return (
-    <div style={{ marginBottom: "3rem" }}>
+    <div style={{ marginBottom: "3rem", position: "relative" }}>
       <h2 style={{ marginBottom: "1rem", fontSize: "1.5rem" }}>
         Continue Watching
       </h2>
+
+      {/* Left Arrow */}
+      {canScrollLeft && (
+        <button
+          onClick={() => scroll("left")}
+          style={{
+            position: "absolute",
+            left: "-15px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 10,
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            border: "none",
+            borderRadius: "50%",
+            width: "40px",
+            height: "40px",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "1.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background-color 0.2s",
+          }}
+          onMouseEnter={(e) =>
+            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.9)")
+          }
+          onMouseLeave={(e) =>
+            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.7)")
+          }
+        >
+          ‹
+        </button>
+      )}
+
+      {/* Carousel Container */}
       <div
+        ref={carouselRef}
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: "1.5rem",
+          display: "flex",
+          gap: "1rem",
+          overflowX: "auto",
+          overflowY: "hidden",
+          scrollBehavior: "smooth",
+          paddingBottom: "1rem",
+          scrollbarWidth: "none", // Firefox
+          msOverflowStyle: "none", // IE/Edge
         }}
+        onScroll={() => {}}
       >
+        <style>
+          {`
+            /* Hide scrollbar for Chrome/Safari */
+            div::-webkit-scrollbar {
+              display: none;
+            }
+          `}
+        </style>
+
         {continueWatching.map((item) => (
           <div
             key={item.id}
             style={{
+              minWidth: "200px",
+              maxWidth: "200px",
               backgroundColor: "#111",
               borderRadius: "10px",
               overflow: "hidden",
               cursor: "pointer",
               position: "relative",
+              flexShrink: 0,
+              transition: "transform 0.2s",
             }}
             onClick={() =>
               navigate(`/watch/${item.content_id}`, { state: { item } })
             }
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.transform = "scale(1.05)")
+            }
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
           >
             <div style={{ position: "relative" }}>
               {item.poster_url ? (
@@ -318,7 +415,17 @@ function ContinueWatchingSection({ navigate }) {
             </div>
 
             <div style={{ padding: "0.6rem 0.7rem" }}>
-              <h6 style={{ margin: 0, fontSize: "0.9rem" }}>{item.title}</h6>
+              <h6
+                style={{
+                  margin: 0,
+                  fontSize: "0.9rem",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {item.title}
+              </h6>
               <p
                 style={{
                   fontSize: "0.75rem",
@@ -333,6 +440,40 @@ function ContinueWatchingSection({ navigate }) {
           </div>
         ))}
       </div>
+
+      {/* Right Arrow */}
+      {canScrollRight && (
+        <button
+          onClick={() => scroll("right")}
+          style={{
+            position: "absolute",
+            right: "-15px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 10,
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            border: "none",
+            borderRadius: "50%",
+            width: "40px",
+            height: "40px",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "1.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background-color 0.2s",
+          }}
+          onMouseEnter={(e) =>
+            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.9)")
+          }
+          onMouseLeave={(e) =>
+            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.7)")
+          }
+        >
+          ›
+        </button>
+      )}
     </div>
   );
 }
