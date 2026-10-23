@@ -15,6 +15,7 @@ const authRoutes = require("./routes/auth");
 const contentRoutes = require("./routes/content");
 const watchlistRoutes = require("./routes/watchlist");
 const progressRoutes = require("./routes/progress");
+const tmdbRoutes = require("./routes/tmdb");
 
 // Creates an express application
 const app = express();
@@ -31,6 +32,11 @@ const allowedOrigin = [
   "https://movie-website-project-rose.vercel.app",
   "https://movie-website-project-3xn3y729j-notjonathans-projects.vercel.app",
 ];
+
+// extra frontend URL can be set with CLIENT_ORIGIN (e.g. in Vercel env vars)
+if (process.env.CLIENT_ORIGIN) {
+  allowedOrigin.push(process.env.CLIENT_ORIGIN);
+}
 
 app.use(
   cors({
@@ -75,8 +81,16 @@ app.use("/api/watchlist", watchlistRoutes);
 // progress routes
 app.use("/api/progress", progressRoutes);
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log("DB name from env:", process.env.DB_NAME); // confirming .env is working
-});
+// tmdb routes (runtime lookups, keeps the TMDB key on the server)
+app.use("/api/tmdb", tmdbRoutes);
+
+// Start Server only when run directly (npm start). On Vercel the exported app is used as a serverless function instead.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log("DB name from env:", process.env.DB_NAME); // confirming .env is working
+  });
+}
+
+// exporting the app so Vercel can run it
+module.exports = app;

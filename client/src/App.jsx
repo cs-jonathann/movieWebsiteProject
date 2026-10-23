@@ -1,9 +1,16 @@
 // adding useEffect which is for fetching data when the page loads
-import React, { useState, useEffect } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   Routes,
   Route,
   Link,
+  NavLink,
   useNavigate,
   Navigate,
   useLocation,
@@ -11,33 +18,251 @@ import {
 } from "react-router-dom";
 
 import "./App.css";
+import { useAuth } from "./AuthContext.jsx";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 console.log("API_BASE_URL from env:", API_BASE_URL);
 
+// how long each homepage carousel slide stays up (also drives the dot progress bar)
+const SLIDE_MS = 7000;
+
+// =========================================================
+// Small helpers
+// =========================================================
+
+// TMDB lets us pick the image size in the URL. posters are saved as w500, cards only need w342 (smaller = faster)
+function resizeTmdbImage(url, size) {
+  return url ? url.replace(/\/t\/p\/w\d+\//, `/t/p/${size}/`) : url;
+}
+
+// "Action, Science Fiction" -> ["Action", "Science Fiction"]
+function splitGenres(genre) {
+  return genre
+    ? genre
+        .split(",")
+        .map((g) => g.trim())
+        .filter(Boolean)
+    : [];
+}
+
+function typeLabel(type) {
+  return type === "movie" ? "Movie" : "TV Show";
+}
+
+// Format seconds to MM:SS or HH:MM:SS
+function formatTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+// turns "Science Fiction" into "science-fiction" so it can be used as an element id
+function slugify(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+// returns a function to call when the API says our saved login token is no longer valid
+// (expired, or the account is gone). It logs the user out; on pages that need an account,
+// RequireAuth then sends them to the login page, which shows a "session expired" note if showNotice is true
+function useExpireSession() {
+  const { logout } = useAuth();
+
+  return useCallback(
+    (showNotice) => {
+      if (showNotice) sessionStorage.setItem("sessionExpired", "1");
+      logout();
+    },
+    [logout]
+  );
+}
+
+// returns a function that adds a title to the logged in user's watchlist.
+// that function returns { ok, message } for the toast popup
+function useAddToWatchlist() {
+  const { token } = useAuth();
+  const expireSession = useExpireSession();
+
+  return useCallback(
+    async (contentId) => {
+      if (!token) {
+        return { ok: false, message: "Log in to save titles to My List." };
+      }
+
+      try {
+        // no notes sent, so re-adding a title keeps any notes it already has
+        const res = await fetch(`${API_BASE_URL}/api/watchlist`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ contentId }),
+        });
+
+        if (res.status === 401) {
+          expireSession(false);
+          return {
+            ok: false,
+            message: "Your session expired. Please log in again.",
+          };
+        }
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          return { ok: false, message: data.error || "Failed to add to My List" };
+        }
+
+        return { ok: true, message: "Added to My List" };
+      } catch (err) {
+        console.error("Add to watchlist error:", err);
+        return { ok: false, message: "Network error while adding to My List" };
+      }
+    },
+    [token, expireSession]
+  );
+}
+
+// small popup message at the bottom of the screen. returns [the popup element, function to show one]
+function useToast() {
+  const [toast, setToast] = useState(null); // { ok, message }
+  const timerRef = useRef(null);
+
+  const showToast = useCallback((next) => {
+    setToast(next);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  // stop the timer if the page closes while a toast is showing
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  const toastEl = toast ? (
+    <div
+      className={`toast ${toast.ok ? "toast--ok" : "toast--error"}`}
+      role="status"
+    >
+      {toast.ok ? <CheckIcon /> : <CloseIcon />}
+      {toast.message}
+    </div>
+  ) : null;
+
+  return [toastEl, showToast];
+}
+
+// =========================================================
+// Icons (tiny inline SVGs so we don't need an icon library)
+// =========================================================
+function Svg({ children, size = 18, filled = false, className }) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke={filled ? "none" : "currentColor"}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+const PlayIcon = (props) => (
+  <Svg filled {...props}>
+    <path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14Z" />
+  </Svg>
+);
+const PlusIcon = (props) => (
+  <Svg {...props}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+);
+const CheckIcon = (props) => (
+  <Svg {...props}>
+    <path d="M5 12.5l4.5 4.5L19 7" />
+  </Svg>
+);
+const CloseIcon = (props) => (
+  <Svg {...props}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Svg>
+);
+const ChevronLeftIcon = (props) => (
+  <Svg {...props}>
+    <path d="M15 18l-6-6 6-6" />
+  </Svg>
+);
+const ChevronRightIcon = (props) => (
+  <Svg {...props}>
+    <path d="M9 18l6-6-6-6" />
+  </Svg>
+);
+const SearchIcon = (props) => (
+  <Svg {...props}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="M20 20l-3.5-3.5" />
+  </Svg>
+);
+const StarIcon = (props) => (
+  <Svg filled {...props}>
+    <path d="M12 2.5l2.94 5.96 6.58.96-4.76 4.64 1.12 6.55L12 17.52l-5.88 3.09 1.12-6.55L2.48 9.42l6.58-.96L12 2.5z" />
+  </Svg>
+);
+const TrashIcon = (props) => (
+  <Svg {...props}>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+  </Svg>
+);
+
+// =========================================================
 // App is main layout
+// =========================================================
 function App() {
-  const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem("user");
-    return stored ? JSON.parse(stored) : null;
-  });
+  // logged in user + logout come from AuthContext (shared with every page)
+  const { user, logout } = useAuth();
 
   // Search state at App level
   const [searchTerm, setSearchTerm] = useState("");
   const [searchInput, setSearchInput] = useState("");
+
+  // header turns solid once the page is scrolled a little
+  const [scrolled, setScrolled] = useState(() => window.scrollY > 10);
+
   const navigate = useNavigate();
   const location = useLocation();
 
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // start each new page at the top
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setUser(null);
+    logout();
+    navigate("/");
   };
 
   // Handle search submit
   const handleSearch = (e) => {
     e.preventDefault();
-    setSearchTerm(searchInput);
+    setSearchTerm(searchInput.trim());
     // Navigate to home page if not already there
     if (location.pathname !== "/") {
       navigate("/");
@@ -50,102 +275,78 @@ function App() {
     setSearchTerm("");
   };
 
+  // only the homepage (with its carousel) gets the see-through header
+  const solidHeader = scrolled || location.pathname !== "/" || !!searchTerm;
+  const displayName = user ? user.username || user.email : "";
+
   return (
     <div className="app-root">
       {/* Top bar */}
-      <header className="app-header">
-        <h2 className="app-title">WatchStreamify</h2>
-        <div className="app-auth">
-          {user ? (
-            <>
-              <span className="app-auth-text">
-                Logged in as <strong>{user.username || user.email}</strong>
-              </span>
-              <button className="btn btn-secondary" onClick={handleLogout}>
-                Logout
-              </button>
-            </>
-          ) : (
-            <span className="app-auth-text app-auth-text--muted">
-              Not logged in
-            </span>
-          )}
-        </div>
-      </header>
-
-      {/* Nav bar */}
-      <nav className="app-nav">
-        <div className="app-nav-inner">
-          <Link className="nav-link" to="/">
-            Home
-          </Link>
-          <Link className="nav-link" to="/watchlist">
-            My Watchlist
+      <header className={`app-header ${solidHeader ? "is-solid" : ""}`}>
+        <div className="header-inner">
+          <Link to="/" className="brand" onClick={handleClearSearch}>
+            Watch<span>Streamify</span>
           </Link>
 
-          {/* Search Bar in Navigation */}
-          <form
-            onSubmit={handleSearch}
-            style={{
-              display: "flex",
-              gap: "0.5rem",
-              marginLeft: "auto",
-              alignItems: "center",
-            }}
-          >
+          <nav className="header-nav" aria-label="Main">
+            <NavLink to="/" end className="header-link header-link--home">
+              Home
+            </NavLink>
+            <NavLink to="/watchlist" className="header-link">
+              My List
+            </NavLink>
+          </nav>
+
+          {/* Search Bar */}
+          <form className="search" role="search" onSubmit={handleSearch}>
+            <SearchIcon className="search-icon" />
             <input
-              type="text"
-              placeholder="Search movies/shows..."
+              className="search-input"
+              type="search"
+              placeholder="Search movies & shows"
+              aria-label="Search movies and shows"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              style={{
-                padding: "0.5rem 0.75rem",
-                fontSize: "0.9rem",
-                border: "1px solid #444",
-                borderRadius: "4px",
-                backgroundColor: "#2a2a2a",
-                color: "#fff",
-                width: "180px",
-                maxWidth: "180px",
-              }}
             />
-            <button
-              type="submit"
-              className="btn btn-primary"
-              style={{
-                padding: "0.5rem 1rem",
-                fontSize: "0.9rem",
-              }}
-            >
-              Search
-            </button>
-            {searchTerm && (
+            {(searchInput || searchTerm) && (
               <button
                 type="button"
+                className="search-clear"
                 onClick={handleClearSearch}
-                className="btn btn-secondary"
-                style={{
-                  padding: "0.5rem 1rem",
-                  fontSize: "0.9rem",
-                }}
+                aria-label="Clear search"
               >
-                Clear
+                <CloseIcon size={16} />
               </button>
             )}
           </form>
 
-          {!user && (
-            <div className="nav-right">
-              <Link className="nav-link" to="/login">
-                Login
-              </Link>
-              <Link className="nav-link" to="/register">
-                Register
-              </Link>
-            </div>
-          )}
+          <div className="header-user">
+            {user ? (
+              <>
+                <span className="avatar" aria-hidden="true">
+                  {displayName.charAt(0)}
+                </span>
+                <span className="header-username">{displayName}</span>
+                <button className="btn btn-ghost btn-sm" onClick={handleLogout}>
+                  Log out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link className="btn btn-ghost btn-sm" to="/login">
+                  Log in
+                </Link>
+                <Link
+                  className="btn btn-primary btn-sm header-signup"
+                  to="/register"
+                >
+                  Sign up
+                </Link>
+              </>
+            )}
+          </div>
         </div>
-      </nav>
+      </header>
 
       {/* Page content */}
       <main className="app-main">
@@ -171,21 +372,30 @@ function App() {
           />
           <Route
             path="/login"
-            element={<LoginPage onAuthSuccess={setUser} />}
+            element={<LoginPage />}
           />
           <Route
             path="/register"
-            element={<RegisterPage onAuthSuccess={setUser} />}
+            element={<RegisterPage />}
           />
         </Routes>
       </main>
+
+      {/* TMDB requires apps using their API to credit them */}
+      <footer className="app-footer">
+        <span>© {new Date().getFullYear()} WatchStreamify</span>
+        <span>
+          Movie &amp; TV data and images from TMDB. This product uses the TMDB
+          API but is not endorsed or certified by TMDB.
+        </span>
+      </footer>
     </div>
   );
 }
 
 // Protect routes
 function RequireAuth({ children }) {
-  const token = localStorage.getItem("token");
+  const { token } = useAuth();
   const location = useLocation();
 
   if (!token) {
@@ -195,23 +405,364 @@ function RequireAuth({ children }) {
   return children;
 }
 
-// Continue Watching Component with Carousel
-function ContinueWatchingSection({ navigate }) {
-  const [continueWatching, setContinueWatching] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [scrollPosition, setScrollPosition] = useState(0);
+// =========================================================
+// Shared pieces
+// =========================================================
+
+// rating • year • type • genre chips
+function MetaRow({ item, maxGenres = 3 }) {
+  const rating = Number(item.rating);
+
+  return (
+    <div className="meta-row">
+      {rating > 0 && (
+        <span className="meta-rating">
+          <StarIcon size={14} /> {rating.toFixed(1)}
+        </span>
+      )}
+      {item.release_year && <span>{item.release_year}</span>}
+      <span>{typeLabel(item.type)}</span>
+      {splitGenres(item.genre)
+        .slice(0, maxGenres)
+        .map((g) => (
+          <span key={g} className="chip">
+            {g}
+          </span>
+        ))}
+    </div>
+  );
+}
+
+// one poster tile. clicking the poster plays the trailer, the "+" adds it to My List
+function PosterCard({ item, onPlay, onAdd, progress, meta }) {
+  const rating = Number(item.rating);
+
+  return (
+    <article className="card">
+      <div className="card-media">
+        <button
+          className="card-poster"
+          onClick={() => onPlay(item)}
+          aria-label={`Play ${item.title} trailer`}
+        >
+          {item.poster_url ? (
+            <img
+              src={resizeTmdbImage(item.poster_url, "w342")}
+              alt=""
+              loading="lazy"
+            />
+          ) : (
+            <span className="card-noimg">{item.title}</span>
+          )}
+
+          <span className="card-overlay">
+            <span className="card-play">
+              <PlayIcon size={22} />
+            </span>
+          </span>
+
+          {rating > 0 && (
+            <span className="card-rating">
+              <StarIcon size={12} /> {rating.toFixed(1)}
+            </span>
+          )}
+
+          {progress != null && (
+            <span className="card-progress">
+              <span style={{ width: `${progress}%` }} />
+            </span>
+          )}
+        </button>
+
+        {onAdd && (
+          <button
+            className="card-add"
+            onClick={() => onAdd(item)}
+            aria-label={`Add ${item.title} to My List`}
+            title="Add to My List"
+          >
+            <PlusIcon size={16} />
+          </button>
+        )}
+      </div>
+
+      <div className="card-info">
+        <h4 className="card-title" title={item.title}>
+          {item.title}
+        </h4>
+        <p className="card-meta">
+          {meta ||
+            `${item.release_year || "—"} • ${typeLabel(item.type)}`}
+        </p>
+      </div>
+    </article>
+  );
+}
+
+// a titled, sideways-scrolling row of posters. "See all" turns it into a full grid
+function ContentRow({
+  id,
+  title,
+  items,
+  onPlay,
+  onAdd,
+  getProgress,
+  getMeta,
+  showCount = false,
+  expanded = false,
+  onToggleExpand,
+}) {
+  const scrollerRef = useRef(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-  const carouselRef = React.useRef(null);
 
+  // Check scroll position to show/hide arrows
+  const updateArrows = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  // re-check when the row resizes (window resize, items loading in)
   useEffect(() => {
-    const fetchContinueWatching = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        setLoading(false);
-        return;
-      }
+    const el = scrollerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(updateArrows);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateArrows, items, expanded]);
 
+  // scroll about one screen-width of posters at a time
+  const scroll = (direction) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * el.clientWidth * 0.85, behavior: "smooth" });
+  };
+
+  return (
+    <section className="row" id={id} aria-label={title}>
+      <div className="row-header">
+        <h3 className="row-title">
+          {title}
+          {showCount && <span className="row-count">{items.length}</span>}
+        </h3>
+        {onToggleExpand && items.length > 6 && (
+          <button className="row-link" onClick={onToggleExpand}>
+            {expanded ? "Show less" : "See all"}
+          </button>
+        )}
+      </div>
+
+      <div className="row-body">
+        {!expanded && canScrollLeft && (
+          <button
+            className="row-arrow row-arrow--left"
+            onClick={() => scroll(-1)}
+            aria-label={`Scroll ${title} left`}
+          >
+            <ChevronLeftIcon size={30} />
+          </button>
+        )}
+
+        <div
+          ref={scrollerRef}
+          className={expanded ? "card-grid" : "row-scroller"}
+          onScroll={expanded ? undefined : updateArrows}
+        >
+          {items.map((item) => (
+            <PosterCard
+              key={item.id}
+              item={item}
+              onPlay={onPlay}
+              onAdd={onAdd}
+              progress={getProgress ? getProgress(item) : undefined}
+              meta={getMeta ? getMeta(item) : undefined}
+            />
+          ))}
+        </div>
+
+        {!expanded && canScrollRight && (
+          <button
+            className="row-arrow row-arrow--right"
+            onClick={() => scroll(1)}
+            aria-label={`Scroll ${title} right`}
+          >
+            <ChevronRightIcon size={30} />
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// grey placeholder rows while content loads
+function SkeletonRows({ rows = 3 }) {
+  return Array.from({ length: rows }, (_, r) => (
+    <div className="row" key={r} aria-hidden="true">
+      <div className="skeleton skeleton-title" />
+      <div className="row-scroller">
+        {Array.from({ length: 8 }, (_, i) => (
+          <div className="skeleton skeleton-card" key={i} />
+        ))}
+      </div>
+    </div>
+  ));
+}
+
+// =========================================================
+// Homepage carousel
+// =========================================================
+function HeroCarousel({ items, onPlay, onAdd }) {
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const touchStartX = useRef(null);
+
+  const count = items.length;
+  const current = items[index];
+
+  // rank among titles of the same type (slides alternate movie/show, so index alone isn't the rank)
+  const typeRank = items
+    .slice(0, index + 1)
+    .filter((i) => i.type === current.type).length;
+
+  const goTo = useCallback((i) => setIndex((i + count) % count), [count]);
+  const next = () => goTo(index + 1);
+  const prev = () => goTo(index - 1);
+
+  // swipe left/right on phones
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 50) {
+      if (dx < 0) next();
+      else prev();
+    }
+    touchStartX.current = null;
+  };
+
+  return (
+    <section
+      className={`hero ${paused ? "is-paused" : ""}`}
+      style={{ "--slide-ms": `${SLIDE_MS}ms` }}
+      aria-roledescription="carousel"
+      aria-label="Featured titles"
+      // pause the auto-advance while the mouse is over it. only real mice: on phones a tap
+      // fires a fake "enter" with no "leave", which would pause the carousel for good
+      onPointerEnter={(e) => e.pointerType === "mouse" && setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* all slides are stacked on top of each other, the active one fades in */}
+      {items.map((item, i) => (
+        <div
+          key={item.id}
+          className={`hero-slide ${i === index ? "is-active" : ""}`}
+          aria-hidden={i !== index}
+        >
+          <img
+            className="hero-backdrop"
+            src={item.backdrop_url}
+            alt=""
+            loading={i === 0 ? "eager" : "lazy"}
+          />
+        </div>
+      ))}
+
+      <div className="hero-shade" />
+
+      {/* key makes the text re-animate on every slide change */}
+      <div
+        className="hero-content"
+        key={current.id}
+        aria-live={paused ? "polite" : "off"}
+      >
+        <span className="hero-badge">
+          #{typeRank} Trending {current.type === "movie" ? "Movie" : "Show"}
+        </span>
+        <h1 className="hero-title">{current.title}</h1>
+        <MetaRow item={current} />
+        <p className="hero-overview">{current.overview}</p>
+
+        <div className="hero-actions">
+          <button
+            className="btn btn-light btn-lg"
+            onClick={() => onPlay(current)}
+          >
+            <PlayIcon /> Play Trailer
+          </button>
+          <button
+            className="btn btn-glass btn-lg"
+            onClick={() => onAdd(current)}
+          >
+            <PlusIcon /> My List
+          </button>
+        </div>
+      </div>
+
+      {count > 1 && (
+        <>
+          <button
+            className="hero-arrow hero-arrow--prev"
+            onClick={prev}
+            aria-label="Previous title"
+          >
+            <ChevronLeftIcon size={24} />
+          </button>
+          <button
+            className="hero-arrow hero-arrow--next"
+            onClick={next}
+            aria-label="Next title"
+          >
+            <ChevronRightIcon size={24} />
+          </button>
+
+          {/* the active dot fills up over SLIDE_MS. when its animation ends we go to the next slide,
+              so pausing the animation (hover) also pauses the carousel */}
+          <div className="hero-dots">
+            {items.map((item, i) => (
+              <button
+                key={item.id}
+                className={`hero-dot ${i === index ? "is-active" : ""}`}
+                onClick={() => goTo(i)}
+                aria-label={`Show ${item.title}`}
+                aria-current={i === index}
+              >
+                <span className="hero-dot-bar">
+                  <span
+                    className="hero-dot-fill"
+                    onAnimationEnd={i === index ? next : undefined}
+                  />
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+// =========================================================
+// Continue Watching row
+// =========================================================
+function ContinueWatchingSection({ onPlay }) {
+  const { token } = useAuth();
+  const expireSession = useExpireSession();
+
+  // remember whose token the rows were loaded with, so after logging out (or switching
+  // accounts) the old person's rows are never shown
+  const [loaded, setLoaded] = useState({ token: null, items: [] });
+
+  // reload whenever the logged in user changes
+  useEffect(() => {
+    if (!token) return;
+
+    const fetchContinueWatching = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/progress`, {
           headers: {
@@ -219,294 +770,77 @@ function ContinueWatchingSection({ navigate }) {
           },
         });
 
-        if (res.ok) {
+        if (res.status === 401) {
+          expireSession(false); // just log out quietly, the homepage works without an account
+        } else if (res.ok) {
           const data = await res.json();
-          setContinueWatching(data);
+          // progress rows have their own id, so use the content's id for keys and links
+          setLoaded({
+            token,
+            items: data.map((p) => ({ ...p, id: p.content_id })),
+          });
         }
       } catch (err) {
         console.error("Error fetching continue watching:", err);
-      } finally {
-        setLoading(false);
       }
     };
 
     fetchContinueWatching();
-  }, []);
+  }, [token, expireSession]);
 
-  // Check scroll position to show/hide arrows
-  useEffect(() => {
-    const checkScroll = () => {
-      if (carouselRef.current) {
-        const { scrollLeft, scrollWidth, clientWidth } = carouselRef.current;
-        setCanScrollLeft(scrollLeft > 0);
-        setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
-      }
-    };
-
-    checkScroll();
-    const carousel = carouselRef.current;
-    if (carousel) {
-      carousel.addEventListener("scroll", checkScroll);
-      return () => carousel.removeEventListener("scroll", checkScroll);
-    }
-  }, [continueWatching]);
-
-  const scroll = (direction) => {
-    if (carouselRef.current) {
-      const scrollAmount = 600; // Adjust scroll distance
-      const newPosition =
-        direction === "left"
-          ? carouselRef.current.scrollLeft - scrollAmount
-          : carouselRef.current.scrollLeft + scrollAmount;
-
-      carouselRef.current.scrollTo({
-        left: newPosition,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  const getProgressPercentage = (progress, duration) => {
-    return ((progress / duration) * 100).toFixed(0);
-  };
-
-  if (loading || continueWatching.length === 0) return null;
+  const items = token && loaded.token === token ? loaded.items : [];
+  if (items.length === 0) return null;
 
   return (
-    <div style={{ marginBottom: "3rem", position: "relative" }}>
-      <h2 style={{ marginBottom: "1rem", fontSize: "1.5rem" }}>
-        Continue Watching
-      </h2>
-
-      {/* Left Arrow */}
-      {canScrollLeft && (
-        <button
-          onClick={() => scroll("left")}
-          style={{
-            position: "absolute",
-            left: "-15px",
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            backgroundColor: "rgba(0, 0, 0, 0.7)",
-            border: "none",
-            borderRadius: "50%",
-            width: "40px",
-            height: "40px",
-            cursor: "pointer",
-            color: "#fff",
-            fontSize: "1.5rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "background-color 0.2s",
-          }}
-          onMouseEnter={(e) =>
-            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.9)")
-          }
-          onMouseLeave={(e) =>
-            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.7)")
-          }
-        >
-          ‹
-        </button>
-      )}
-
-      {/* Carousel Container */}
-      <div
-        ref={carouselRef}
-        style={{
-          display: "flex",
-          gap: "1rem",
-          overflowX: "auto",
-          overflowY: "hidden",
-          scrollBehavior: "smooth",
-          paddingBottom: "1rem",
-          scrollbarWidth: "none", // Firefox
-          msOverflowStyle: "none", // IE/Edge
-        }}
-        onScroll={() => {}}
-      >
-        <style>
-          {`
-            /* Hide scrollbar for Chrome/Safari */
-            div::-webkit-scrollbar {
-              display: none;
-            }
-          `}
-        </style>
-
-        {continueWatching.map((item) => (
-          <div
-            key={item.id}
-            style={{
-              minWidth: "200px",
-              maxWidth: "200px",
-              backgroundColor: "#111",
-              borderRadius: "10px",
-              overflow: "hidden",
-              cursor: "pointer",
-              position: "relative",
-              flexShrink: 0,
-              transition: "transform 0.2s",
-            }}
-            onClick={() =>
-              navigate(`/watch/${item.content_id}`, { state: { item } })
-            }
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.transform = "scale(1.05)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-          >
-            <div style={{ position: "relative" }}>
-              {item.poster_url ? (
-                <img
-                  src={item.poster_url}
-                  alt={item.title}
-                  style={{
-                    width: "100%",
-                    height: "260px",
-                    objectFit: "cover",
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: "100%",
-                    height: "260px",
-                    backgroundColor: "#222",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span style={{ color: "#888" }}>No image</span>
-                </div>
-              )}
-
-              {/* Progress bar */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: "4px",
-                  backgroundColor: "rgba(255,255,255,0.3)",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${getProgressPercentage(
-                      item.progress_seconds,
-                      item.duration_seconds
-                    )}%`,
-                    backgroundColor: "#0d6efd",
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ padding: "0.6rem 0.7rem" }}>
-              <h6
-                style={{
-                  margin: 0,
-                  fontSize: "0.9rem",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {item.title}
-              </h6>
-              <p
-                style={{
-                  fontSize: "0.75rem",
-                  color: "#ccc",
-                  margin: "0.2rem 0 0",
-                }}
-              >
-                {formatTime(item.progress_seconds)} /{" "}
-                {formatTime(item.duration_seconds)}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Right Arrow */}
-      {canScrollRight && (
-        <button
-          onClick={() => scroll("right")}
-          style={{
-            position: "absolute",
-            right: "-15px",
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            backgroundColor: "rgba(0, 0, 0, 0.7)",
-            border: "none",
-            borderRadius: "50%",
-            width: "40px",
-            height: "40px",
-            cursor: "pointer",
-            color: "#fff",
-            fontSize: "1.5rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "background-color 0.2s",
-          }}
-          onMouseEnter={(e) =>
-            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.9)")
-          }
-          onMouseLeave={(e) =>
-            (e.target.style.backgroundColor = "rgba(0, 0, 0, 0.7)")
-          }
-        >
-          ›
-        </button>
-      )}
-    </div>
+    <ContentRow
+      id="continue-watching"
+      title="Continue Watching"
+      items={items}
+      onPlay={onPlay}
+      getProgress={(item) =>
+        Math.min(
+          100,
+          Math.round((item.progress_seconds / item.duration_seconds) * 100)
+        )
+      }
+      getMeta={(item) =>
+        `${formatTime(item.progress_seconds)} / ${formatTime(
+          item.duration_seconds
+        )}`
+      }
+    />
   );
 }
 
+// =========================================================
+// Homepage
+// =========================================================
+
+// genres that don't make good "featured" picks for the carousel
+const NOT_FEATURED_GENRES = ["News", "Talk", "Reality", "Soap"];
+
+// the catalog, kept after the first load so going Back to the homepage doesn't download it again
+let catalogCache = null;
+
 function BrowsePage({ searchTerm }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
-  const itemsPerPage = 108;
-
   const navigate = useNavigate();
+  const [toastEl, showToast] = useToast();
+  const addToWatchlist = useAddToWatchlist();
 
+  const [items, setItems] = useState(() => catalogCache || []);
+  const [loading, setLoading] = useState(!catalogCache);
+  const [error, setError] = useState("");
+
+  const [tab, setTab] = useState("movie"); // "movie" or "tv_show"
+  const [expandedGenre, setExpandedGenre] = useState(null); // genre row showing "See all"
+
+  // the whole catalog is only ~600 titles, so load it once and group it in the browser
   useEffect(() => {
+    if (catalogCache) return;
+
     const fetchContent = async () => {
-      setLoading(true);
-      setError("");
-
       try {
-        // Build URL with search parameter if exists
-        const url = new URL(`${API_BASE_URL}/api/content`);
-        url.searchParams.append("page", currentPage);
-        url.searchParams.append("limit", itemsPerPage);
-        if (searchTerm) {
-          url.searchParams.append("search", searchTerm);
-        }
-
-        const res = await fetch(url);
+        const res = await fetch(`${API_BASE_URL}/api/content?limit=1000`);
         const data = await res.json();
 
         if (!res.ok) {
@@ -514,11 +848,9 @@ function BrowsePage({ searchTerm }) {
           return;
         }
 
-        setItems(data.items || []);
-        setTotalPages(data.totalPages || 1);
-        setTotalItems(data.total || 0);
-
-        console.log("Loaded page:", currentPage, "Items:", data.items?.length);
+        // comes back sorted most popular first
+        catalogCache = data.items || [];
+        setItems(catalogCache);
       } catch (err) {
         console.error("Error fetching content:", err);
         setError("Network error while loading content");
@@ -528,259 +860,250 @@ function BrowsePage({ searchTerm }) {
     };
 
     fetchContent();
-  }, [currentPage, searchTerm]); // Re-fetch when page or search changes
+  }, []);
 
-  const handleAddToWatchlist = async (contentId) => {
-    const token = localStorage.getItem("token");
-    setSuccessMessage("");
-    setError("");
+  const handlePlay = (item) =>
+    navigate(`/watch/${item.id}`, { state: { item } });
 
-    if (!token) {
-      setError("You must be logged in to add to your watchlist.");
-      return;
-    }
+  const handleAdd = async (item) => showToast(await addToWatchlist(item.id));
 
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/watchlist`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          contentId,
-          notes: "",
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to add to watchlist");
-        return;
-      }
-
-      setSuccessMessage("Added to watchlist!");
-    } catch (err) {
-      console.error("Add to watchlist error:", err);
-      setError("Network error while adding to watchlist");
-    }
-  };
-
-  // Pagination handlers
-  const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handlePageClick = (pageNum) => {
-    setCurrentPage(pageNum);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  // Generate page numbers
-  const getPageNumbers = () => {
-    const pages = [];
-    const maxPagesToShow = 5;
-
-    if (totalPages <= maxPagesToShow) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      if (currentPage <= 3) {
-        for (let i = 1; i <= 4; i++) pages.push(i);
-        pages.push("...");
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 2) {
-        pages.push(1);
-        pages.push("...");
-        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
-      } else {
-        pages.push(1);
-        pages.push("...");
-        pages.push(currentPage - 1);
-        pages.push(currentPage);
-        pages.push(currentPage + 1);
-        pages.push("...");
-        pages.push(totalPages);
-      }
-    }
-
-    return pages;
-  };
-
-  if (loading) {
-    return (
-      <div className="page page-browse">
-        <p>Loading content...</p>
-      </div>
+  // carousel picks: popular + recent titles with a big backdrop image. mix of movies and shows
+  const featured = useMemo(() => {
+    const candidates = items.filter(
+      (i) =>
+        i.backdrop_url &&
+        i.overview &&
+        Number(i.rating) >= 6 &&
+        !splitGenres(i.genre).some((g) => NOT_FEATURED_GENRES.includes(g))
     );
-  }
 
-  if (error) {
+    // newest titles first (still most-popular-first inside that), then everything else
+    const newestYear = Math.max(0, ...candidates.map((i) => i.release_year || 0));
+    const isRecent = (i) => (i.release_year || 0) >= newestYear - 1;
+    const ordered = [
+      ...candidates.filter(isRecent),
+      ...candidates.filter((i) => !isRecent(i)),
+    ];
+
+    const movies = ordered.filter((i) => i.type === "movie").slice(0, 5);
+    const shows = ordered.filter((i) => i.type === "tv_show").slice(0, 3);
+
+    // alternate movie, show, movie, show...
+    const mixed = [];
+    for (let i = 0; i < Math.max(movies.length, shows.length); i++) {
+      if (movies[i]) mixed.push(movies[i]);
+      if (shows[i]) mixed.push(shows[i]);
+    }
+    return mixed;
+  }, [items]);
+
+  // everything for the selected tab (movies or shows)
+  const tabItems = useMemo(
+    () => items.filter((i) => i.type === tab),
+    [items, tab]
+  );
+
+  // top 20 for the "Popular" row (skipping news/talk shows, which TMDB ranks very high)
+  const popularItems = useMemo(
+    () =>
+      tabItems
+        .filter(
+          (i) =>
+            !splitGenres(i.genre).some((g) => NOT_FEATURED_GENRES.includes(g))
+        )
+        .slice(0, 20),
+    [tabItems]
+  );
+
+  // one row per genre. a title with 3 genres shows up in all 3 rows
+  const genreRows = useMemo(() => {
+    const groups = new Map();
+
+    for (const item of tabItems) {
+      const genres = splitGenres(item.genre);
+      for (const g of genres.length > 0 ? genres : ["More to Explore"]) {
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(item);
+      }
+    }
+
+    // biggest genres first, the catch-all row last
+    return [...groups.entries()]
+      .map(([genre, list]) => ({ genre, items: list }))
+      .sort(
+        (a, b) =>
+          (a.genre === "More to Explore") - (b.genre === "More to Explore") ||
+          b.items.length - a.items.length
+      );
+  }, [tabItems]);
+
+  // search is done in the browser since we already have every title
+  const searchResults = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return q ? items.filter((i) => i.title.toLowerCase().includes(q)) : [];
+  }, [items, searchTerm]);
+
+  const switchTab = (next) => {
+    setTab(next);
+    setExpandedGenre(null);
+  };
+
+  const jumpToGenre = (genre) => {
+    document
+      .getElementById(`genre-${slugify(genre)}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // ---------- search results view ----------
+  if (searchTerm) {
     return (
-      <div className="page page-browse">
-        <p className="text-error">{error}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="page page-browse">
-      {/* Show active search */}
-      {searchTerm && (
-        <div
-          style={{ textAlign: "center", marginBottom: "1rem", opacity: 0.8 }}
-        >
-          Searching for: <strong>"{searchTerm}"</strong>
+      <div className="page">
+        <div className="page-header">
+          <h1 className="page-title">Results for “{searchTerm}”</h1>
+          {!loading && (
+            <span className="page-sub">
+              {searchResults.length}{" "}
+              {searchResults.length === 1 ? "title" : "titles"}
+            </span>
+          )}
         </div>
-      )}
 
-      {/* Continue Watching Section */}
-      {!searchTerm && <ContinueWatchingSection navigate={navigate} />}
-
-      {/* Pagination info */}
-
-      {successMessage && (
-        <p className="text-success text-center">{successMessage}</p>
-      )}
-
-      {items.length === 0 ? (
-        <p className="text-center">
-          {searchTerm
-            ? `No results found for "${searchTerm}"`
-            : "No content found."}
-        </p>
-      ) : (
-        <>
-          <div className="content-grid">
-            {items.map((item) => (
-              <div key={item.id} className="content-card">
-                <div className="content-card-poster">
-                  {item.poster_url ? (
-                    <img
-                      src={item.poster_url}
-                      alt={item.title}
-                      className="content-card-img"
-                    />
-                  ) : (
-                    <span className="content-card-noimg">No image</span>
-                  )}
-                </div>
-
-                <div className="content-card-body">
-                  <h6 className="content-card-title">{item.title}</h6>
-                  <div className="content-card-meta">
-                    {item.type === "movie" ? "Movie" : "TV Show"} •{" "}
-                    {item.release_year || "Unknown year"}
-                    {item.genre ? ` • ${item.genre}` : ""}
-                  </div>
-
-                  <button
-                    onClick={() =>
-                      navigate(`/watch/${item.id}`, { state: { item } })
-                    }
-                    className="btn btn-secondary btn-full"
-                    style={{ marginBottom: "0.4rem" }}
-                  >
-                    Watch now
-                  </button>
-
-                  <button
-                    onClick={() => handleAddToWatchlist(item.id)}
-                    className="btn btn-primary btn-full"
-                  >
-                    Add to Watchlist
-                  </button>
-                </div>
-              </div>
+        {loading ? (
+          <p className="muted">Searching...</p>
+        ) : error ? (
+          <p className="text-error">{error}</p>
+        ) : searchResults.length === 0 ? (
+          <div className="empty-state">
+            <h2>No matches</h2>
+            <p>Try a different title, or clear the search to browse everything.</p>
+          </div>
+        ) : (
+          <div className="card-grid card-grid--flush">
+            {searchResults.map((item) => (
+              <PosterCard
+                key={item.id}
+                item={item}
+                onPlay={handlePlay}
+                onAdd={handleAdd}
+              />
             ))}
           </div>
+        )}
+        {toastEl}
+      </div>
+    );
+  }
 
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: "0.5rem",
-                marginTop: "2rem",
-                marginBottom: "2rem",
-                flexWrap: "wrap",
-              }}
-            >
+  // ---------- normal homepage ----------
+  const tabName = tab === "movie" ? "Movies" : "TV Shows";
+  const hasHero = loading || featured.length > 0;
+
+  return (
+    <div className="home">
+      {loading ? (
+        <div className="hero hero--skeleton skeleton" aria-hidden="true" />
+      ) : (
+        featured.length > 0 && (
+          <HeroCarousel items={featured} onPlay={handlePlay} onAdd={handleAdd} />
+        )
+      )}
+
+      <div className={`home-content ${hasHero ? "" : "home-content--no-hero"}`}>
+        <ContinueWatchingSection onPlay={handlePlay} />
+
+        <section id="browse" aria-label="Browse">
+          <div className="browse-header">
+            <h2 className="section-title">Browse {tabName}</h2>
+
+            <div className="tabs" role="tablist" aria-label="Content type">
               <button
-                onClick={handlePreviousPage}
-                disabled={currentPage === 1}
-                className="btn btn-secondary"
-                style={{
-                  opacity: currentPage === 1 ? 0.5 : 1,
-                  cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                }}
+                role="tab"
+                aria-selected={tab === "movie"}
+                className={`tab ${tab === "movie" ? "is-active" : ""}`}
+                onClick={() => switchTab("movie")}
               >
-                Previous
+                Movies
               </button>
-
-              {getPageNumbers().map((pageNum, idx) =>
-                pageNum === "..." ? (
-                  <span key={`ellipsis-${idx}`} style={{ padding: "0.5rem" }}>
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={pageNum}
-                    onClick={() => handlePageClick(pageNum)}
-                    className={`btn ${
-                      currentPage === pageNum ? "btn-primary" : "btn-secondary"
-                    }`}
-                    style={{
-                      minWidth: "40px",
-                      fontWeight: currentPage === pageNum ? "bold" : "normal",
-                    }}
-                  >
-                    {pageNum}
-                  </button>
-                )
-              )}
-
               <button
-                onClick={handleNextPage}
-                disabled={currentPage === totalPages}
-                className="btn btn-secondary"
-                style={{
-                  opacity: currentPage === totalPages ? 0.5 : 1,
-                  cursor:
-                    currentPage === totalPages ? "not-allowed" : "pointer",
-                }}
+                role="tab"
+                aria-selected={tab === "tv_show"}
+                className={`tab ${tab === "tv_show" ? "is-active" : ""}`}
+                onClick={() => switchTab("tv_show")}
               >
-                Next
+                TV Shows
               </button>
             </div>
+          </div>
+
+          {error && (
+            <p className="text-error" style={{ padding: "0 var(--gutter)" }}>
+              {error}
+            </p>
           )}
-        </>
-      )}
+
+          {loading ? (
+            <SkeletonRows />
+          ) : (
+            <>
+              {/* genre shortcuts */}
+              <div className="chips">
+                {genreRows.map((row) => (
+                  <button
+                    key={row.genre}
+                    className="chip-btn"
+                    onClick={() => jumpToGenre(row.genre)}
+                  >
+                    {row.genre}
+                  </button>
+                ))}
+              </div>
+
+              <ContentRow
+                key={`popular-${tab}`} // new row per tab so the scroll position resets
+                id={`popular-${tab}`}
+                title={`Popular ${tabName}`}
+                items={popularItems}
+                onPlay={handlePlay}
+                onAdd={handleAdd}
+              />
+
+              {genreRows.map((row) => (
+                <ContentRow
+                  key={`${tab}-${row.genre}`}
+                  id={`genre-${slugify(row.genre)}`}
+                  title={row.genre}
+                  items={row.items}
+                  onPlay={handlePlay}
+                  onAdd={handleAdd}
+                  showCount
+                  expanded={expandedGenre === row.genre}
+                  onToggleExpand={() =>
+                    setExpandedGenre(
+                      expandedGenre === row.genre ? null : row.genre
+                    )
+                  }
+                />
+              ))}
+            </>
+          )}
+        </section>
+      </div>
+
+      {toastEl}
     </div>
   );
 }
 
+// =========================================================
 // Watchlist page
+// =========================================================
 function WatchlistPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const token = localStorage.getItem("token");
+  const { token } = useAuth();
+  const expireSession = useExpireSession();
   const navigate = useNavigate();
 
   const fetchWatchlist = async () => {
@@ -799,6 +1122,11 @@ function WatchlistPage() {
           Authorization: `Bearer ${token}`,
         },
       });
+
+      if (res.status === 401) {
+        expireSession(true);
+        return;
+      }
 
       const data = await res.json();
 
@@ -875,183 +1203,291 @@ function WatchlistPage() {
     }
   };
 
-  if (!token) {
-    return (
-      <div className="page page-watchlist">
-        <h1 className="page-title">My Watchlist</h1>
-        <p className="text-center text-error">
-          You are not logged in. Please log in to view your watchlist.
-        </p>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="page page-watchlist">
-        <h1 className="page-title">My Watchlist</h1>
-        <p className="text-center">Loading watchlist...</p>
-      </div>
-    );
-  }
+  // watchlist rows have their own id, the content's id is content_id
+  const play = (item) =>
+    navigate(`/watch/${item.content_id}`, {
+      state: { item: { ...item, id: item.content_id } },
+    });
 
   return (
-    <div className="page page-watchlist">
-      <h1 className="page-title">My Watchlist</h1>
+    <div className="page">
+      <div className="page-header">
+        <h1 className="page-title">My List</h1>
+        {!loading && items.length > 0 && (
+          <span className="page-sub">
+            {items.length} {items.length === 1 ? "title" : "titles"} ·{" "}
+            {items.filter((i) => i.watched).length} watched
+          </span>
+        )}
+      </div>
 
-      {error && <p className="text-center text-error">{error}</p>}
-
-      {items.length === 0 ? (
-        <p className="text-center">Your watchlist is empty.</p>
+      {loading ? (
+        <div className="list-grid" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div className="skeleton" key={i} style={{ height: 192 }} />
+          ))}
+        </div>
+      ) : error && items.length === 0 ? (
+        <p className="text-error">{error}</p>
+      ) : items.length === 0 ? (
+        <div className="empty-state">
+          <h2>Your list is empty</h2>
+          <p>Tap the + on any movie or show to save it here.</p>
+          <Link className="btn btn-primary" to="/">
+            Browse titles
+          </Link>
+        </div>
       ) : (
-        <div className="watchlist-grid">
-          {items.map((item) => (
-            <div key={item.id} className="watchlist-card-wrapper">
-              <div className="watchlist-card">
-                <div className="watchlist-poster">
-                  {item.poster_url ? (
-                    <img
-                      src={item.poster_url}
-                      alt={item.title || `Content #${item.content_id}`}
-                      className="watchlist-poster-img"
-                    />
-                  ) : (
-                    <div className="watchlist-poster-placeholder">No image</div>
-                  )}
+        <div className="list-grid">
+          {error && (
+            // errors from marking watched / removing (the list itself still loaded)
+            <p className="text-error" style={{ gridColumn: "1 / -1", margin: 0 }}>
+              {error}
+            </p>
+          )}
+          {items.map((item) => {
+            const title = item.title || `Content #${item.content_id}`;
+
+            return (
+              <article key={item.id} className="list-card card">
+                <div className="card-media">
+                  <button
+                    className="card-poster"
+                    onClick={() => play(item)}
+                    aria-label={`Play ${title} trailer`}
+                  >
+                    {item.poster_url ? (
+                      <img
+                        src={resizeTmdbImage(item.poster_url, "w342")}
+                        alt=""
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="card-noimg">No image</span>
+                    )}
+                    <span className="card-overlay">
+                      <span className="card-play">
+                        <PlayIcon size={20} />
+                      </span>
+                    </span>
+                    {item.watched && (
+                      <span className="badge-watched">
+                        <CheckIcon size={11} /> Watched
+                      </span>
+                    )}
+                  </button>
                 </div>
 
-                <div className="watchlist-body">
-                  <h5 className="watchlist-title">
-                    {item.title || `Content #${item.content_id}`}
-                    {item.genre && (
-                      <span className="watchlist-genre"> — {item.genre}</span>
-                    )}
-                  </h5>
-
-                  {item.release_year && (
-                    <p className="watchlist-meta">Year: {item.release_year}</p>
+                <div className="list-card-body">
+                  <h3 className="list-card-title">{title}</h3>
+                  <MetaRow item={item} maxGenres={0} />
+                  {item.genre && (
+                    <p className="list-card-genres">{item.genre}</p>
                   )}
-
-                  <p className="watchlist-meta">
-                    Status:{" "}
-                    {item.watched ? (
-                      <span className="watchlist-status watchlist-status--watched">
-                        Watched
-                      </span>
-                    ) : (
-                      <span className="watchlist-status watchlist-status--not">
-                        Not watched
-                      </span>
-                    )}
-                  </p>
-
                   {item.notes && (
-                    <p className="watchlist-meta">Notes: {item.notes}</p>
+                    <p className="list-card-notes">Notes: {item.notes}</p>
                   )}
 
-                  {/* adding watch now button */}
-                  <div className="mt-auto d-flex flex-column gap-2">
-                    {/* ⭐ New: Watch now button */}
+                  <div className="list-card-actions">
                     <button
-                      onClick={() =>
-                        navigate(`/watch/${item.content_id}`, {
-                          state: { item },
-                        })
-                      }
-                      className="btn btn-sm btn-secondary"
+                      onClick={() => play(item)}
+                      className="btn btn-sm btn-primary"
                     >
-                      Watch now
+                      <PlayIcon size={14} /> Trailer
                     </button>
-
-                    <div className="d-flex gap-2">
-                      <button
-                        onClick={() => handleToggleWatched(item)}
-                        className="btn btn-sm btn-primary"
-                      >
-                        Mark as {item.watched ? "Not Watched" : "Watched"}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="btn btn-sm btn-danger"
-                      >
-                        Remove
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => handleToggleWatched(item)}
+                      className={`btn btn-sm ${
+                        item.watched ? "btn-success" : "btn-ghost"
+                      }`}
+                      aria-pressed={item.watched}
+                    >
+                      <CheckIcon size={14} />
+                      {item.watched ? "Watched" : "Mark watched"}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="btn btn-sm btn-icon btn-danger-ghost"
+                      aria-label={`Remove ${title} from My List`}
+                      title="Remove"
+                    >
+                      <TrashIcon size={15} />
+                    </button>
                   </div>
                 </div>
-              </div>
-            </div>
-          ))}
+              </article>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-// Helper: build Vidsrc embed URL for a given time + optional season / episode. given this piece of content (movie or show), what Vidsrc link should I use to play it?
-function buildEmbedUrl(item, season = 1, episode = 1) {
-  if (!item) return null;
+// =========================================================
+// YouTube trailer player
+// =========================================================
 
-  const movieBase = "https://vidsrc-embed.ru/embed/movie";
-  const tvBase = "https://vidsrc-embed.ru/embed/tv";
+// loads YouTube's player script once. It lets us read the trailer's real position and length
+let youTubeApiPromise = null;
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
 
-  // ✅ correct field names and spelling
-  const hasImdb = !!item.imdb_id;
-  const hasTmdb = !!item.tmdb_id;
+  if (!youTubeApiPromise) {
+    youTubeApiPromise = new Promise((resolve, reject) => {
+      const previous = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        previous?.();
+        resolve(window.YT);
+      };
 
-  // MOVIES
-  if (item.type === "movie") {
-    if (hasImdb) {
-      // e.g. https://vidsrc-embed.ru/embed/movie/tt0468569
-      return `${movieBase}/${item.imdb_id}`;
-    }
-    if (hasTmdb) {
-      // fallback using TMDB id as query param
-      return `${movieBase}?tmdb=${item.tmdb_id}`;
-    }
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.onerror = () => {
+        youTubeApiPromise = null; // allow a retry next time
+        reject(new Error("YouTube player script failed to load"));
+      };
+      document.head.appendChild(script);
+    });
   }
-
-  // TV SHOWS
-  if (item.type === "tv_show") {
-    if (hasImdb) {
-      // e.g. https://vidsrc-embed.ru/embed/tv/tt0944947/1-1
-      return `${tvBase}/${item.imdb_id}/${season}-${episode}`;
-    }
-    if (hasTmdb) {
-      // fallback with TMDB as query param
-      return `${tvBase}?tmdb=${item.tmdb_id}&season=${season}&episode=${episode}`;
-    }
-  }
-
-  // If we get here, we had no usable ID
-  return null;
+  return youTubeApiPromise;
 }
 
-// Page that shows the actual video player using Vidsrc iframe
+// plays a trailer and calls onProgress(currentSeconds, durationSeconds) every 10s while it plays,
+// when it's paused or ends, and when the page is left
+function TrailerPlayer({ videoKey, title, startSeconds, onProgress }) {
+  const hostRef = useRef(null);
+  const [failed, setFailed] = useState(false);
+
+  // keep the newest callback without re-creating the player
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
+
+  // the start time only matters when the player is first created, so ignore later changes
+  const [startAt] = useState(startSeconds);
+
+  useEffect(() => {
+    let player = null;
+    let timer = null;
+    let cancelled = false;
+    const host = hostRef.current;
+
+    const report = () => {
+      try {
+        if (typeof player?.getCurrentTime !== "function") return; // not ready yet
+        const current = Math.floor(player.getCurrentTime());
+        const duration = Math.floor(player.getDuration());
+        if (current > 0 && duration > 0) onProgressRef.current(current, duration);
+      } catch (err) {
+        console.error("Error reading trailer position:", err);
+      }
+    };
+
+    loadYouTubeApi()
+      .then((YT) => {
+        if (cancelled) return;
+
+        // YouTube replaces this element with its iframe, so give it one React doesn't manage
+        const el = document.createElement("div");
+        host.appendChild(el);
+
+        player = new YT.Player(el, {
+          videoId: videoKey,
+          playerVars: { autoplay: 1, rel: 0, start: startAt },
+          events: {
+            onStateChange: (e) => {
+              clearInterval(timer);
+              if (e.data === YT.PlayerState.PLAYING) {
+                timer = setInterval(report, 10000); // Every 10 seconds
+              } else if (
+                e.data === YT.PlayerState.PAUSED ||
+                e.data === YT.PlayerState.ENDED
+              ) {
+                report();
+              }
+            },
+          },
+        });
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      report(); // save where they were when leaving the page
+      player?.destroy?.();
+      host.innerHTML = "";
+    };
+  }, [videoKey, startAt]);
+
+  // if YouTube's script is blocked, still show the trailer, just without saving progress
+  if (failed) {
+    return (
+      <iframe
+        src={`https://www.youtube.com/embed/${videoKey}?autoplay=1&rel=0&start=${startAt}`}
+        title={`${title} trailer`}
+        allow="autoplay; encrypted-media; picture-in-picture"
+        allowFullScreen
+      />
+    );
+  }
+
+  return <div ref={hostRef} className="player-host" />;
+}
+
+// =========================================================
+// Page that plays the title's trailer using the YouTube embed player
+// =========================================================
 function WatchPage() {
   // If your route is /watch/:id, and the URL is /watch/7, then id === "7". That tells WatchPage which content to show.
   const { contentId } = useParams(); // /watch/:contentId
   const navigate = useNavigate(); // lets user go back or go to another page in coded
   const location = useLocation();
+  const [toastEl, showToast] = useToast();
+  const { token } = useAuth();
+  const expireSession = useExpireSession();
+  const addToWatchlist = useAddToWatchlist();
 
-  // item may be passed from Browse/Watchlist via location.state
+  // item may be passed from Browse/Watchlist via location.state (so the page shows instantly)
   const passedItem = location.state?.item || null;
 
   const [item, setItem] = useState(passedItem); // content we're trying to watch
-  const [season, setSeason] = useState(1); // used for tv shows to build the Vidsrc url
-  const [episode, setEpisode] = useState(1); // used for tv shows to build the Vidsrc url
-  const [error, setError] = useState(""); // text to show if something goes wrong
-  const [savedProgress, setSavedProgress] = useState(0);
-  const [actualDuration, setActualDuration] = useState(7200); // Default 2 hours in seconds
-  const [isPageVisible, setIsPageVisible] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [trailerKey, setTrailerKey] = useState(undefined); // YouTube video key. undefined = still loading, null = no trailer
+  const [savedProgress, setSavedProgress] = useState(null); // { seconds, duration } of the trailer, null until loaded
 
-  // Load saved progress and fetch actual duration from TMDB
+  // only these two fields matter for the TMDB lookup below
+  const itemType = item?.type;
+  const tmdbId = item?.tmdb_id;
+
+  // Always load the full details by id (adds the description/backdrop, and makes the page work after a refresh)
   useEffect(() => {
-    const loadProgressAndDuration = async () => {
-      const token = localStorage.getItem("token");
+    const loadItem = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/content/${contentId}`);
+        if (res.ok) {
+          setItem(await res.json());
+        } else {
+          setNotFound(true);
+        }
+      } catch (err) {
+        console.error("Error loading content:", err);
+        setNotFound(true);
+      }
+    };
 
-      // Load saved progress
-      if (token && contentId) {
+    loadItem();
+  }, [contentId]);
+
+  // Load where the user left off in this trailer
+  useEffect(() => {
+    const loadProgress = async () => {
+      if (token) {
         try {
           const res = await fetch(`${API_BASE_URL}/api/progress/${contentId}`, {
             headers: {
@@ -1059,256 +1495,189 @@ function WatchPage() {
             },
           });
 
+          if (res.status === 401) {
+            expireSession(true);
+            return;
+          }
+
           if (res.ok) {
             const data = await res.json();
-            setSavedProgress(data.progress_seconds || 0);
-            console.log("Loaded progress:", data.progress_seconds);
+            setSavedProgress({
+              seconds: data.progress_seconds || 0,
+              duration: data.duration_seconds || 0,
+            });
+            return;
           }
         } catch (err) {
           console.error("Error loading progress:", err);
         }
       }
 
-      // Fetch actual duration from TMDB
-      if (item && item.tmdb_id) {
-        try {
-          const tmdbType = item.type === "movie" ? "movie" : "tv";
-          const tmdbApiKey = import.meta.env.VITE_TMDB_API_KEY;
+      setSavedProgress({ seconds: 0, duration: 0 }); // start from the beginning
+    };
 
-          if (!tmdbApiKey) {
-            console.warn("TMDB API key not found, using default duration");
-            setActualDuration(item.type === "movie" ? 7200 : 2700);
-            return;
-          }
+    loadProgress();
+  }, [contentId, token, expireSession]);
 
-          const tmdbRes = await fetch(
-            `https://api.themoviedb.org/3/${tmdbType}/${item.tmdb_id}?api_key=${tmdbApiKey}`
-          );
+  // Save the trailer's real position (called by TrailerPlayer only while a trailer is playing)
+  const saveProgress = useCallback(
+    (progressSeconds, durationSeconds) => {
+      if (!token) return;
 
-          if (tmdbRes.ok) {
-            const tmdbData = await tmdbRes.json();
+      fetch(`${API_BASE_URL}/api/progress`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          contentId: parseInt(contentId, 10),
+          progressSeconds,
+          durationSeconds,
+        }),
+      })
+        .then((res) => {
+          if (res.status === 401) expireSession(true);
+        })
+        .catch((err) => console.error("Error saving progress:", err));
+    },
+    [token, contentId, expireSession]
+  );
 
-            if (item.type === "movie" && tmdbData.runtime) {
-              // Movie runtime in minutes -> convert to seconds
-              setActualDuration(tmdbData.runtime * 60);
-              console.log("Movie duration:", tmdbData.runtime, "minutes");
-            } else if (item.type === "tv_show") {
-              // TV show episode runtime (average)
-              const episodeRuntime = tmdbData.episode_run_time?.[0] || 45;
-              setActualDuration(episodeRuntime * 60);
-              console.log("TV episode duration:", episodeRuntime, "minutes");
-            }
-          }
-        } catch (err) {
-          console.error("Error fetching TMDB duration:", err);
-          // Fallback: estimate based on type
-          setActualDuration(item.type === "movie" ? 7200 : 2700); // 2hrs for movies, 45min for TV
+  // Load the trailer's YouTube key from our backend (which asks TMDB)
+  useEffect(() => {
+    if (!tmdbId) return;
+
+    const loadTrailer = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/tmdb/trailer/${itemType}/${tmdbId}`
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          setTrailerKey(data.youtube_key);
+        } else {
+          setTrailerKey(null); // TMDB has no trailer for this title
         }
+      } catch (err) {
+        console.error("Error loading trailer:", err);
+        setTrailerKey(null);
       }
     };
 
-    loadProgressAndDuration();
-  }, [contentId, item]);
+    loadTrailer();
+  }, [itemType, tmdbId]);
 
-  // Track page visibility (pause tracking when user switches tabs)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      setIsPageVisible(!document.hidden);
-      console.log("Page visibility:", !document.hidden);
-    };
+  // resume where they left off, unless they had (nearly) finished it -> start over
+  const resumeFrom =
+    savedProgress && savedProgress.seconds < savedProgress.duration * 0.95
+      ? savedProgress.seconds
+      : 0;
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
+  // if this page was opened directly (no history in our app), "Back" goes home instead of leaving the site
+  const goBack = () =>
+    location.key === "default" ? navigate("/") : navigate(-1);
 
-  // Save progress periodically (only when page is visible)
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token || !contentId || !isPageVisible) return;
-
-    const interval = setInterval(() => {
-      const newProgress = savedProgress + 10;
-
-      // Don't exceed 95% of duration (so "continue watching" stops showing near the end)
-      if (newProgress < actualDuration * 0.95) {
-        fetch(`${API_BASE_URL}/api/progress`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            contentId: parseInt(contentId, 10),
-            progressSeconds: newProgress,
-            durationSeconds: actualDuration,
-          }),
-        }).catch((err) => console.error("Error saving progress:", err));
-
-        setSavedProgress(newProgress);
-      } else {
-        console.log("Near end of content, stopping progress tracking");
-      }
-    }, 10000); // Every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [contentId, savedProgress, actualDuration, isPageVisible]);
-
-  // handling error
-  useEffect(() => {
-    if (!item) {
-      setError(
-        "No content info found. Please go back and choose a title again."
-      );
-    }
-  }, [item]);
-
-  // streaming URL, calling the helper from up above
-  //   Based on item.type and its imdb_id or tmdb_id, plus season/episode for TV, it returns something like:
-  // Movie: https://vidsrc-embed.ru/embed/movie/tt5433140
-  // TV: https://vidsrc-embed.ru/embed/tv/tt0944947/1-1
-  // If it doesn't have what it needs (no IDs), it returns an empty string ""
-  const embedUrl = buildEmbedUrl(item, season, episode);
-
-  // Format seconds to MM:SS or HH:MM:SS
-  const formatTime = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-      return `${hours}:${mins.toString().padStart(2, "0")}:${secs
-        .toString()
-        .padStart(2, "0")}`;
-    }
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
+  const handleAdd = async () =>
+    showToast(await addToWatchlist(parseInt(contentId, 10)));
 
   return (
-    // centers everything anf keeps it from being too wide
-    <div
-      style={{
-        maxWidth: "1200px",
-        margin: "0 auto",
-        padding: "2rem 1rem",
-        color: "#f8f9fa",
-      }}
-    >
-      {/* back button */}
-      <button
-        // makes the browser go back one page
-        onClick={() => navigate(-1)}
-        style={{
-          marginBottom: "1rem",
-          padding: "0.4rem 0.8rem",
-          borderRadius: "4px",
-          border: "none",
-          backgroundColor: "#0d6efd",
-          color: "white",
-          cursor: "pointer",
-        }}
-      >
-        ← Back
-      </button>
-
-      {/* if we do have an item, show all its details, if not show an error */}
-      {item ? (
-        <>
-          <h1 style={{ marginBottom: "0.5rem" }}>
-            {item.title}{" "}
-            {item.release_year && (
-              <span style={{ fontSize: "0.8em", opacity: 0.8 }}>
-                ({item.release_year})
-              </span>
-            )}
-          </h1>
-          <p style={{ opacity: 0.8, marginBottom: "1rem" }}>
-            {item.type === "movie" ? "Movie" : "TV Show"}
-            {item.genre ? ` • ${item.genre}` : ""}
-            {savedProgress > 0 && (
-              <span style={{ color: "#4cd964", marginLeft: "1rem" }}>
-                • Resuming from {formatTime(savedProgress)}
-              </span>
-            )}
-          </p>
-
-          {/* TV controls, for the season(s) and episode(s) Lets the user type what season and episode they want. When they type, we call setSeason / setEpisode*/}
-          {item.type === "tv_show" && (
-            <div
-              style={{
-                display: "flex",
-                gap: "1rem",
-                marginBottom: "1rem",
-                flexWrap: "wrap",
-              }}
-            >
-              <label>
-                Season:{" "}
-                <input
-                  type="number"
-                  min="1"
-                  value={season}
-                  onChange={(e) => setSeason(Number(e.target.value) || 1)}
-                  style={{ width: "60px" }}
-                />
-              </label>
-              <label>
-                Episode:{" "}
-                <input
-                  type="number"
-                  min="1"
-                  value={episode}
-                  onChange={(e) => setEpisode(Number(e.target.value) || 1)}
-                  style={{ width: "60px" }}
-                />
-              </label>
-            </div>
-          )}
-
-          {/* player frame */}
-          {embedUrl ? (
-            <div
-              style={{
-                position: "relative",
-                paddingBottom: "56.25%", // 16:9
-                height: 0,
-                overflow: "hidden",
-                borderRadius: "10px",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
-              }}
-            >
-              {/* iframe points to the Vidsrc URL and this is what actually shows the video player on screen */}
-              <iframe
-                src={embedUrl}
-                title={item.title}
-                allowFullScreen
-                frameBorder="0"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                }}
-              />
-            </div>
-          ) : (
-            // if the embedUrl is empty, show a red error message
-            <p style={{ color: "red" }}>
-              Sorry, we don&apos;t have a valid stream URL for this title.
-            </p>
-          )}
-        </>
-      ) : (
-        <p style={{ color: "red" }}>{error}</p>
+    <div className="watch">
+      {item?.backdrop_url && (
+        <div
+          className="watch-backdrop"
+          style={{ backgroundImage: `url(${item.backdrop_url})` }}
+        />
       )}
+
+      <div className="watch-inner">
+        {/* back button */}
+        <button className="btn btn-ghost btn-sm watch-back" onClick={goBack}>
+          <ChevronLeftIcon size={16} /> Back
+        </button>
+
+        {/* if we do have an item, show all its details, if not show an error */}
+        {item ? (
+          <>
+            {/* player frame */}
+            <div className="player">
+              {trailerKey && savedProgress ? (
+                // this is what actually shows the video player on screen
+                <TrailerPlayer
+                  key={trailerKey}
+                  videoKey={trailerKey}
+                  title={item.title}
+                  startSeconds={resumeFrom}
+                  onProgress={saveProgress}
+                />
+              ) : trailerKey === undefined || !savedProgress ? (
+                // still waiting on the trailer lookup / saved progress
+                <div className="player-msg">
+                  <span className="spinner" aria-hidden="true" />
+                  Loading trailer...
+                </div>
+              ) : (
+                // TMDB had no trailer for this title
+                <div className="player-msg">
+                  Sorry, there&apos;s no trailer available for this title.
+                </div>
+              )}
+            </div>
+
+            <div className="watch-details">
+              <div>
+                <h1 className="watch-title">{item.title}</h1>
+                <MetaRow item={item} />
+                {trailerKey && resumeFrom > 0 && (
+                  <p className="watch-resume">
+                    Resuming trailer from {formatTime(resumeFrom)}
+                  </p>
+                )}
+                {item.overview && (
+                  <p className="watch-overview">{item.overview}</p>
+                )}
+              </div>
+
+              <button className="btn btn-primary" onClick={handleAdd}>
+                <PlusIcon /> Add to My List
+              </button>
+            </div>
+          </>
+        ) : notFound ? (
+          <p className="text-error">
+            We couldn&apos;t find that title. Please go back and choose another.
+          </p>
+        ) : (
+          <div className="player">
+            <div className="player-msg">
+              <span className="spinner" aria-hidden="true" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {toastEl}
     </div>
   );
 }
 
-// Login + Register stay basically the same
-function LoginPage({ onAuthSuccess }) {
+// =========================================================
+// Login + Register
+// =========================================================
+function LoginPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
+  const location = useLocation();
+
+  // set by expireSession when an old login stopped working. read it once, then clear it
+  const [sessionExpired] = useState(
+    () => sessionStorage.getItem("sessionExpired") === "1"
+  );
+  useEffect(() => {
+    sessionStorage.removeItem("sessionExpired");
+  }, []);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -1335,12 +1704,11 @@ function LoginPage({ onAuthSuccess }) {
         return;
       }
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      // saves the token + user (in localStorage too, so a refresh keeps you logged in)
+      login(data.token, data.user);
 
-      if (onAuthSuccess) onAuthSuccess(data.user);
-
-      navigate("/watchlist");
+      // go back to the page that asked them to log in (e.g. a trailer), otherwise home
+      navigate(location.state?.from?.pathname || "/", { replace: true });
     } catch (err) {
       console.error("Login error:", err);
       setError("Network error. Please try again.");
@@ -1350,49 +1718,77 @@ function LoginPage({ onAuthSuccess }) {
   };
 
   return (
-    <div className="page page-auth">
+    <div className="auth">
       <div className="auth-card">
-        <h1 className="page-title">Login</h1>
+        <Link to="/" className="brand">
+          Watch<span>Streamify</span>
+        </Link>
+        <h1 className="auth-title">Welcome back</h1>
+        <p className="auth-sub">
+          Log in to keep your list and pick up where you left off.
+        </p>
+
+        {sessionExpired && (
+          <p className="form-error" style={{ marginBottom: 16 }}>
+            Your session expired. Please log in again.
+          </p>
+        )}
+
         <form className="auth-form" onSubmit={handleSubmit}>
-          <label className="auth-label">
-            Email:
+          <label className="field">
+            <span className="field-label">Email</span>
             <input
-              className="auth-input"
+              className="field-input"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </label>
 
-          <label className="auth-label">
-            Password:
+          <label className="field">
+            <span className="field-label">Password</span>
             <input
-              className="auth-input"
+              className="field-input"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </label>
 
-          {error && <p className="text-error">{error}</p>}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
 
           <button
-            className="btn btn-primary btn-full"
+            className="btn btn-primary btn-lg btn-block"
             type="submit"
             disabled={loading}
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "Logging in..." : "Log in"}
           </button>
         </form>
+
+        <p className="auth-switch">
+          New here?{" "}
+          <Link to="/register" state={location.state}>
+            Create an account
+          </Link>
+        </p>
       </div>
     </div>
   );
 }
 
-function RegisterPage({ onAuthSuccess }) {
+function RegisterPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
+  const location = useLocation();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1420,12 +1816,10 @@ function RegisterPage({ onAuthSuccess }) {
         return;
       }
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      // saves the token + user (in localStorage too, so a refresh keeps you logged in)
+      login(data.token, data.user);
 
-      if (onAuthSuccess) onAuthSuccess(data.user);
-
-      navigate("/");
+      navigate(location.state?.from?.pathname || "/", { replace: true });
     } catch (err) {
       console.error("Register error:", err);
       setError("Network error. Please try again.");
@@ -1435,53 +1829,75 @@ function RegisterPage({ onAuthSuccess }) {
   };
 
   return (
-    <div className="page page-auth">
+    <div className="auth">
       <div className="auth-card">
-        <h1 className="page-title">Register</h1>
+        <Link to="/" className="brand">
+          Watch<span>Streamify</span>
+        </Link>
+        <h1 className="auth-title">Create your account</h1>
+        <p className="auth-sub">
+          Save movies and shows to your list and track what you&apos;ve
+          watched.
+        </p>
+
         <form className="auth-form" onSubmit={handleSubmit}>
-          <label className="auth-label">
-            Username:
+          <label className="field">
+            <span className="field-label">Username</span>
             <input
-              className="auth-input"
+              className="field-input"
               type="text"
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
             />
           </label>
 
-          <label className="auth-label">
-            Email:
+          <label className="field">
+            <span className="field-label">Email</span>
             <input
-              className="auth-input"
+              className="field-input"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </label>
 
-          <label className="auth-label">
-            Password:
+          <label className="field">
+            <span className="field-label">Password</span>
             <input
-              className="auth-input"
+              className="field-input"
               type="password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </label>
 
-          {error && <p className="text-error">{error}</p>}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
 
           <button
-            className="btn btn-primary btn-full"
+            className="btn btn-primary btn-lg btn-block"
             type="submit"
             disabled={loading}
           >
-            {loading ? "Creating account..." : "Register"}
+            {loading ? "Creating account..." : "Create account"}
           </button>
         </form>
+
+        <p className="auth-switch">
+          Already have an account?{" "}
+          <Link to="/login" state={location.state}>
+            Log in
+          </Link>
+        </p>
       </div>
     </div>
   );

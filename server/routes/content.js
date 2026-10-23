@@ -6,7 +6,8 @@ const pool = require("../config/db");
 router.get("/", async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 24;
+    // capped so one request can't ask for an unlimited number of rows
+    const limit = Math.min(parseInt(req.query.limit, 10) || 24, 1000);
     const offset = (page - 1) * limit;
     const searchTerm = req.query.search || "";
 
@@ -33,11 +34,11 @@ router.get("/", async (req, res) => {
       `;
       countParams = [`%${searchTerm}%`];
     } else {
-      // No search term, return all content
+      // No search term, return all content (most popular first)
       query = `
         SELECT *
         FROM content
-        ORDER BY id
+        ORDER BY popularity DESC NULLS LAST, id
         LIMIT $1 OFFSET $2
       `;
       queryParams = [limit, offset];
@@ -62,6 +63,28 @@ router.get("/", async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching paginated content:", err);
+    res.status(500).json({ error: "Failed to load content" });
+  }
+});
+
+// GET /api/content/5 - one title by its id (used by the watch page, e.g. after a refresh)
+router.get("/:id", async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) {
+    return res.status(400).json({ error: "Invalid content id" });
+  }
+
+  try {
+    const result = await pool.query("SELECT * FROM content WHERE id = $1", [
+      req.params.id,
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Content not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error fetching content item:", err);
     res.status(500).json({ error: "Failed to load content" });
   }
 });

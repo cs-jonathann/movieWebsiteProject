@@ -1,6 +1,5 @@
-# Ignore build artifacts and dependencies
-client/node_modules/
-server/node_modules/
+# Ignore build artifacts and dependencies (any node_modules folder, including the root one)
+node_modules/
 dist/
 
 # Ignore environment files
@@ -9,3 +8,5 @@ server/.env
 
 # OS / editor junk
 .DS_Store
+.vercel
+.env*

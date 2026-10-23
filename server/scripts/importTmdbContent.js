@@ -57,6 +57,51 @@ async function fetchTvExternalIds(tmdbId) {
   return res.json();
 }
 
+// TMDB only gives genre ids (like 28) on each movie/show, so we grab the id -> name list once.
+// type is "movie" or "tv". returns something like { 28: "Action", 878: "Science Fiction" }
+async function fetchGenreMap(type) {
+  const res = await fetch(
+    `${TMDB_BASE}/genre/${type}/list?api_key=${TMDB_API_KEY}&language=en-US`
+  );
+  if (!res.ok) {
+    throw new Error(`TMDb ${type} genre list failed: ` + res.status);
+  }
+  const data = await res.json();
+  const map = {};
+  for (const g of data.genres || []) {
+    map[g.id] = g.name;
+  }
+  return map;
+}
+
+// turns [28, 878] into "Action, Science Fiction" (null if there are no genres)
+function genreNames(genreIds, genreMap) {
+  const names = (genreIds || []).map((id) => genreMap[id]).filter(Boolean);
+
+  // genre column is VARCHAR(100). drop whole names that don't fit instead of cutting one in half
+  let joined = "";
+  for (const name of names) {
+    const next = joined ? `${joined}, ${name}` : name;
+    if (next.length > 100) break;
+    joined = next;
+  }
+  return joined || null;
+}
+
+// the extra details the homepage carousel/cards use. works for both movies and tv shows
+// (TMDB uses the same field names for these on both)
+function extraDetails(t) {
+  return {
+    // wide image used behind the homepage carousel
+    backdropUrl: t.backdrop_path
+      ? `https://image.tmdb.org/t/p/w1280${t.backdrop_path}`
+      : null,
+    overview: t.overview || null, // short description
+    rating: t.vote_average ?? null, // 0-10 score
+    popularity: t.popularity ?? null, // TMDB's "how trending is it" number
+  };
+}
+
 // --- Main import logic ---
 // importing the populars content into the content table
 async function importMovies(pages = 1) {
@@ -64,6 +109,8 @@ async function importMovies(pages = 1) {
   const client = await pool.connect();
 
   try {
+    const genreMap = await fetchGenreMap("movie");
+
     for (let page = 1; page <= pages; page++) {
       console.log(`Fetching popular movies page ${page}...`);
       const movies = await fetchPopularMovies(page);
@@ -82,18 +129,23 @@ async function importMovies(pages = 1) {
           ? parseInt(m.release_date.slice(0, 4), 10)
           : null;
 
+        const extra = extraDetails(m);
+
         //   inserting into table, if the TMDB_ID is new, it inserts it into a new row onto the table but if the ID already exists then it just updates the row instead
         await client.query(
           `
-          INSERT INTO content (tmdb_id, imdb_id, title, type, poster_url, release_year, genre)
-          VALUES ($1, $2, $3, 'movie', $4, $5, $6)
-          ON CONFLICT (tmdb_id) DO UPDATE
+          INSERT INTO content (tmdb_id, imdb_id, title, type, poster_url, release_year, genre, backdrop_url, overview, rating, popularity)
+          VALUES ($1, $2, $3, 'movie', $4, $5, $6, $7, $8, $9, $10)
+          ON CONFLICT (tmdb_id, type) DO UPDATE
           SET imdb_id = EXCLUDED.imdb_id,
               title = EXCLUDED.title,
-              type = EXCLUDED.type,
               poster_url = EXCLUDED.poster_url,
               release_year = EXCLUDED.release_year,
-              genre = EXCLUDED.genre
+              genre = EXCLUDED.genre,
+              backdrop_url = EXCLUDED.backdrop_url,
+              overview = EXCLUDED.overview,
+              rating = EXCLUDED.rating,
+              popularity = EXCLUDED.popularity
         `,
           [
             m.id,
@@ -101,9 +153,11 @@ async function importMovies(pages = 1) {
             m.title,
             posterUrl,
             releaseYear,
-            m.genre_ids && m.genre_ids.length > 0
-              ? m.genre_ids.join(",")
-              : null, // simple genre storage for now
+            genreNames(m.genre_ids, genreMap),
+            extra.backdropUrl,
+            extra.overview,
+            extra.rating,
+            extra.popularity,
           ]
         );
         console.log(`Upserted movie: ${m.title}`);
@@ -117,6 +171,8 @@ async function importMovies(pages = 1) {
 async function importTvShows(pages = 1) {
   const client = await pool.connect();
   try {
+    const genreMap = await fetchGenreMap("tv");
+
     for (let page = 1; page <= pages; page++) {
       console.log(`Fetching popular TV page ${page}...`);
       const shows = await fetchPopularTv(page);
@@ -135,18 +191,23 @@ async function importTvShows(pages = 1) {
           ? parseInt(s.first_air_date.slice(0, 4), 10)
           : null;
 
+        const extra = extraDetails(s);
+
         //   inserting into table, if the TMDB_ID is new, it inserts it into a new row onto the table but if the ID already exists then it just updates the row instead
         await client.query(
           `
-          INSERT INTO content (tmdb_id, imdb_id, title, type, poster_url, release_year, genre)
-          VALUES ($1, $2, $3, 'tv_show', $4, $5, $6)
-          ON CONFLICT (tmdb_id) DO UPDATE
+          INSERT INTO content (tmdb_id, imdb_id, title, type, poster_url, release_year, genre, backdrop_url, overview, rating, popularity)
+          VALUES ($1, $2, $3, 'tv_show', $4, $5, $6, $7, $8, $9, $10)
+          ON CONFLICT (tmdb_id, type) DO UPDATE
           SET imdb_id = EXCLUDED.imdb_id,
               title = EXCLUDED.title,
-              type = EXCLUDED.type,
               poster_url = EXCLUDED.poster_url,
               release_year = EXCLUDED.release_year,
-              genre = EXCLUDED.genre
+              genre = EXCLUDED.genre,
+              backdrop_url = EXCLUDED.backdrop_url,
+              overview = EXCLUDED.overview,
+              rating = EXCLUDED.rating,
+              popularity = EXCLUDED.popularity
         `,
           [
             s.id,
@@ -154,9 +215,11 @@ async function importTvShows(pages = 1) {
             s.name,
             posterUrl,
             firstYear,
-            s.genre_ids && s.genre_ids.length > 0
-              ? s.genre_ids.join(",")
-              : null,
+            genreNames(s.genre_ids, genreMap),
+            extra.backdropUrl,
+            extra.overview,
+            extra.rating,
+            extra.popularity,
           ]
         );
         console.log(`Upserted TV show: ${s.name}`);
@@ -183,8 +246,9 @@ async function main() {
     console.log("TMDb import completed.");
   } catch (err) {
     console.error("Import failed:", err);
+    process.exitCode = 1; // so scripts/CI running this can tell it failed
   } finally {
-    process.exit(0);
+    process.exit(); // uses process.exitCode (0 unless the import failed)
   }
 }
 

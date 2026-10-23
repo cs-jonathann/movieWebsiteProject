@@ -23,7 +23,7 @@ router.post("/", requireAuth, async (req, res) => {
       `INSERT INTO watchlist (user_id, content_id, notes)
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id, content_id)
-       DO UPDATE SET notes = EXCLUDED.notes, updated_at = NOW()
+       DO UPDATE SET notes = COALESCE(EXCLUDED.notes, watchlist.notes), updated_at = NOW()
        RETURNING *`,
       [userId, contentId, notes || null]
     );

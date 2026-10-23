@@ -41,5 +41,11 @@ if (connectionString) {
   });
 }
 
+// If an idle connection gets dropped (network blip, Supabase closing it), log it instead of crashing the whole server.
+// The pool just opens a new connection on the next query.
+pool.on("error", (err) => {
+  console.error("Idle database connection error:", err.message);
+});
+
 // exporting so other files can use it.
 module.exports = pool;

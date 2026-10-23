@@ -12,13 +12,20 @@ CREATE TABLE users (
 -- Content table (pre-seeded, read-only for users)
 CREATE TABLE content (
   id SERIAL PRIMARY KEY,
-  tmdb_id INTEGER UNIQUE NOT NULL,
+  tmdb_id INTEGER NOT NULL,
+  imdb_id VARCHAR(20),
   title VARCHAR(255) NOT NULL,
   type VARCHAR(20) CHECK (type IN ('movie', 'tv_show')) NOT NULL,
   poster_url VARCHAR(500),
   release_year INTEGER,
   genre VARCHAR(100),
-  created_at TIMESTAMP DEFAULT NOW()
+  backdrop_url VARCHAR(500),
+  overview TEXT,
+  rating REAL,
+  popularity REAL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  -- TMDB movie ids and tv ids are separate, so a movie and a show can share the same tmdb_id
+  UNIQUE(tmdb_id, type)
 );
 
 -- Watchlist table (main feature with UPDATE capability)
