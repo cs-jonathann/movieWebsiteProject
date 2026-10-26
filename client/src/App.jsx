@@ -1665,6 +1665,10 @@ function WatchPage() {
 // =========================================================
 // Login + Register
 // =========================================================
+
+// the public demo account (also listed in the README). the server resets its list on every login
+const DEMO_LOGIN = { identifier: "demo", password: "WatchDemo2026" };
+
 function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -1684,8 +1688,8 @@ function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // shared by the form and the "Use the demo account" button
+  const logIn = async (loginId, loginPassword) => {
     setError("");
     setLoading(true);
 
@@ -1696,7 +1700,11 @@ function LoginPage() {
           "Content-Type": "application/json",
         },
         // "email" too, so a backend that hasn't been redeployed yet still understands it
-        body: JSON.stringify({ identifier, email: identifier, password }),
+        body: JSON.stringify({
+          identifier: loginId,
+          email: loginId,
+          password: loginPassword,
+        }),
       });
 
       const data = await res.json();
@@ -1717,6 +1725,11 @@ function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    logIn(identifier, password);
   };
 
   return (
@@ -1776,6 +1789,20 @@ function LoginPage() {
             disabled={loading}
           >
             {loading ? "Logging in..." : "Log in"}
+          </button>
+
+          {/* for recruiters / reviewers: logs into the shared demo account listed in the README */}
+          <button
+            className="btn btn-ghost btn-lg btn-block"
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              setIdentifier(DEMO_LOGIN.identifier);
+              setPassword(DEMO_LOGIN.password);
+              logIn(DEMO_LOGIN.identifier, DEMO_LOGIN.password);
+            }}
+          >
+            Use the demo account
           </button>
         </form>
 

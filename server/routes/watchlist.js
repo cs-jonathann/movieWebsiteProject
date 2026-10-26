@@ -5,6 +5,19 @@ const requireAuth = require("../middleware/auth");
 
 const router = express.Router();
 
+// notes longer than this are rejected, so nobody can stuff huge text into a list
+const MAX_NOTES_LENGTH = 500;
+
+// returns an error message if notes is the wrong type or too long, otherwise null
+const notesError = (notes) => {
+  if (notes === undefined || notes === null) return null;
+  if (typeof notes !== "string") return "notes must be text";
+  if (notes.length > MAX_NOTES_LENGTH) {
+    return `notes can be at most ${MAX_NOTES_LENGTH} characters`;
+  }
+  return null;
+};
+
 /**
  * CREATE
  * POST /api/watchlist
@@ -16,6 +29,9 @@ router.post("/", requireAuth, async (req, res) => {
 
   if (!contentId) {
     return res.status(400).json({ error: "contentId is required" });
+  }
+  if (notesError(notes)) {
+    return res.status(400).json({ error: notesError(notes) });
   }
 
   try {
@@ -71,6 +87,10 @@ router.put("/:id", requireAuth, async (req, res) => {
   const userId = req.userId;
   const watchlistId = req.params.id;
   const { watched, notes } = req.body;
+
+  if (notesError(notes)) {
+    return res.status(400).json({ error: notesError(notes) });
+  }
 
   try {
     const result = await pool.query(

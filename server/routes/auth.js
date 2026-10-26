@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt"); // library for hashing passwords.
 const jwt = require("jsonwebtoken"); // used to create JWT tokens when a user register / logs in
 const rateLimit = require("express-rate-limit"); // limits how many login attempts one IP can make
 const pool = require("../config/db"); // your PostgreSQL connection pool from config/db.js. This is how we talk to the users table.
+const { isDemoUser, resetDemoAccount } = require("../services/demoAccount");
 
 const router = express.Router(); // define routes in this file and then plug them into server.js
 
@@ -137,6 +138,14 @@ router.post("/login", loginLimiter, async (req, res) => {
     // no matching user, or wrong password: same generic message either way
     if (!user) {
       return res.status(401).json(INVALID_LOGIN);
+    }
+
+    // the shared demo account starts fresh on every login, so earlier visitors' changes don't carry over.
+    // if the reset fails we still log them in, it just means the list isn't fresh
+    if (isDemoUser(user)) {
+      await resetDemoAccount(user.id).catch((err) =>
+        console.error("Demo reset error:", err)
+      );
     }
 
     // 3) Create a JWT token for this logged-in user
