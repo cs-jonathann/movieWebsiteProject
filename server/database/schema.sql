@@ -34,7 +34,6 @@ CREATE TABLE watchlist (
   user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
   content_id INTEGER REFERENCES content(id) ON DELETE CASCADE NOT NULL,
   watched BOOLEAN DEFAULT FALSE,
-  notes TEXT,
   added_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(user_id, content_id)

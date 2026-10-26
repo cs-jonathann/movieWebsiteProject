@@ -32,6 +32,10 @@ async function migrateContent() {
       END $$;
     `);
 
+    // watchlist notes were removed (nobody could add them from the site, and the shared
+    // demo account shouldn't hold visitor text), so drop the column and anything saved in it
+    await pool.query("ALTER TABLE watchlist DROP COLUMN IF EXISTS notes;");
+
     console.log("✅ content table migrated successfully!");
     process.exit(0);
   } catch (err) {

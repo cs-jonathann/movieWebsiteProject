@@ -1,7 +1,8 @@
 // server/services/demoAccount.js
 // The shared demo account that recruiters / reviewers can log into (listed in the README).
 // Everyone uses the same account, so it gets put back to a clean starting state on every
-// demo login. That way one visitor's changes (or notes) never show up for the next one.
+// demo login. A new visitor never sees an earlier visitor's changes, but two visitors
+// logged in at the same time do share one list (My List reloads if an item vanishes).
 const pool = require("../config/db");
 
 const DEMO_USERNAME = "demo";

@@ -1231,12 +1231,6 @@
   font-size: 0.8rem;
 }
 
-.list-card-notes {
-  margin: 8px 0 0;
-  color: var(--text-2);
-  font-size: 0.85rem;
-}
-
 .list-card-actions {
   display: flex;
   flex-wrap: wrap;

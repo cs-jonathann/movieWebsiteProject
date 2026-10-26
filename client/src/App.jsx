@@ -68,6 +68,16 @@ function slugify(text) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
+// reads a JSON response body, or returns {} when there isn't one
+// (e.g. a Vercel timeout page is HTML, and res.json() would throw on it)
+async function readJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
 // returns a function to call when the API says our saved login token is no longer valid
 // (expired, or the account is gone). It logs the user out; on pages that need an account,
 // RequireAuth then sends them to the login page, which shows a "session expired" note if showNotice is true
@@ -96,7 +106,6 @@ function useAddToWatchlist() {
       }
 
       try {
-        // no notes sent, so re-adding a title keeps any notes it already has
         const res = await fetch(`${API_BASE_URL}/api/watchlist`, {
           method: "POST",
           headers: {
@@ -114,13 +123,17 @@ function useAddToWatchlist() {
           };
         }
 
-        const data = await res.json();
+        const data = await readJson(res);
 
         if (!res.ok) {
           return { ok: false, message: data.error || "Failed to add to My List" };
         }
 
-        return { ok: true, message: "Added to My List" };
+        // 200 instead of 201 means it was already saved
+        return {
+          ok: true,
+          message: data.alreadyInList ? "Already in My List" : "Added to My List",
+        };
       } catch (err) {
         console.error("Add to watchlist error:", err);
         return { ok: false, message: "Network error while adding to My List" };
@@ -1149,7 +1162,40 @@ function WatchlistPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ids of list items with a request in flight, so a double click can't send two at once
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const setBusy = (id, busy) =>
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  // handles the error cases both buttons share. returns true if the request worked
+  const handleListResponse = async (res, fallbackError) => {
+    if (res.status === 401) {
+      expireSession(true);
+      return false;
+    }
+    // 404: the item is already gone (e.g. someone else on the shared demo account), so reload the list
+    if (res.status === 404) {
+      await fetchWatchlist(); // clears the error first, so set the message after
+      setError("That title was already removed, so your list was refreshed.");
+      return false;
+    }
+    if (!res.ok) {
+      const data = await readJson(res);
+      setError(data.error || fallbackError);
+      return false;
+    }
+    return true;
+  };
+
   const handleToggleWatched = async (item) => {
+    if (busyIds.has(item.id)) return;
+    setBusy(item.id, true);
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/watchlist/${item.id}`, {
         method: "PUT",
@@ -1157,19 +1203,14 @@ function WatchlistPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          watched: !item.watched,
-          notes: item.notes || "",
-        }),
+        body: JSON.stringify({ watched: !item.watched }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to update watchlist item");
+      if (!(await handleListResponse(res, "Failed to update watchlist item"))) {
         return;
       }
 
+      const data = await readJson(res);
       setItems((prev) =>
         prev.map((w) =>
           w.id === item.id ? { ...w, watched: data.watched } : w
@@ -1178,10 +1219,15 @@ function WatchlistPage() {
     } catch (err) {
       console.error("Update watchlist error:", err);
       setError("Network error while updating watchlist");
+    } finally {
+      setBusy(item.id, false);
     }
   };
 
   const handleDelete = async (id) => {
+    if (busyIds.has(id)) return;
+    setBusy(id, true);
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/watchlist/${id}`, {
         method: "DELETE",
@@ -1190,9 +1236,7 @@ function WatchlistPage() {
         },
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to delete watchlist item");
+      if (!(await handleListResponse(res, "Failed to delete watchlist item"))) {
         return;
       }
 
@@ -1200,6 +1244,8 @@ function WatchlistPage() {
     } catch (err) {
       console.error("Delete watchlist error:", err);
       setError("Network error while deleting watchlist item");
+    } finally {
+      setBusy(id, false);
     }
   };
 
@@ -1284,9 +1330,6 @@ function WatchlistPage() {
                   {item.genre && (
                     <p className="list-card-genres">{item.genre}</p>
                   )}
-                  {item.notes && (
-                    <p className="list-card-notes">Notes: {item.notes}</p>
-                  )}
 
                   <div className="list-card-actions">
                     <button
@@ -1297,6 +1340,7 @@ function WatchlistPage() {
                     </button>
                     <button
                       onClick={() => handleToggleWatched(item)}
+                      disabled={busyIds.has(item.id)}
                       className={`btn btn-sm ${
                         item.watched ? "btn-success" : "btn-ghost"
                       }`}
@@ -1307,6 +1351,7 @@ function WatchlistPage() {
                     </button>
                     <button
                       onClick={() => handleDelete(item.id)}
+                      disabled={busyIds.has(item.id)}
                       className="btn btn-sm btn-icon btn-danger-ghost"
                       aria-label={`Remove ${title} from My List`}
                       title="Remove"
