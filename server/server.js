@@ -47,6 +47,9 @@ app.use(
 
 app.use(express.json()); // parses incoming JSON requests
 
+// Vercel sits in front of the app, so trust its forwarded IP (the login rate limit counts per IP)
+app.set("trust proxy", 1);
+
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ message: "Server is running!" });

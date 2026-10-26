@@ -1678,7 +1678,8 @@ function LoginPage() {
     sessionStorage.removeItem("sessionExpired");
   }, []);
 
-  const [email, setEmail] = useState("");
+  // email or username, the server accepts either
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1694,7 +1695,8 @@ function LoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        // "email" too, so a backend that hasn't been redeployed yet still understands it
+        body: JSON.stringify({ identifier, email: identifier, password }),
       });
 
       const data = await res.json();
@@ -1736,13 +1738,16 @@ function LoginPage() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <label className="field">
-            <span className="field-label">Email</span>
+            <span className="field-label">Email or username</span>
             <input
               className="field-input"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
               required
             />
           </label>
@@ -1847,6 +1852,9 @@ function RegisterPage() {
               className="field-input"
               type="text"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
